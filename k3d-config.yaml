@@ -1,0 +1,31 @@
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+
+metadata:
+  name: games-hub
+
+# Single server node is sufficient for local development
+servers: 1
+agents: 0
+
+# Local image registry wired into the cluster
+# Images pushed to localhost:5000/<image> are pullable from within pods
+registries:
+  create:
+    name: games-hub-registry
+    host: "0.0.0.0"
+    hostPort: "5001"
+  config: |
+    mirrors:
+      "localhost:5001":
+        endpoint:
+          - "http://games-hub-registry:5000"
+
+# Port mappings for accessing in-cluster services from the host
+ports:
+  - port: 8080:80
+    nodeFilters:
+      - loadbalancer
+  - port: 8443:443
+    nodeFilters:
+      - loadbalancer
