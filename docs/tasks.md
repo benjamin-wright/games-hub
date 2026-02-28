@@ -6,9 +6,9 @@ An itemised list of the next most important changes to make, ordered by priority
 |---|-------|----------|--------|
 | 4 | [DB Operator — PostgresDatabaseReconciler](#4-db-operator--postgresdatabasereconciler) | High | ✅ Done |
 | 5 | [DB Operator — PostgresDatabase Admin Secret](#5-db-operator--postgresdatabase-admin-secret) | High | ✅ Done |
-| 7 | [DB Operator — Avoid redundant StatefulSet re-read after write](#7-db-operator--avoid-redundant-statefulset-re-read-after-write) | High | Not Started |
-| 8 | [DB Operator — Add drift check before StatefulSet update](#8-db-operator--add-drift-check-before-statefulset-update) | High | Not Started |
-| 9 | [DB Operator — Batch status sub-resource updates](#9-db-operator--batch-status-sub-resource-updates) | Medium | Not Started |
+| 7 | [DB Operator — Avoid redundant StatefulSet re-read after write](#7-db-operator--avoid-redundant-statefulset-re-read-after-write) | High | ✅ Done |
+| 8 | [DB Operator — Add drift check before StatefulSet update](#8-db-operator--add-drift-check-before-statefulset-update) | High | ✅ Done |
+| 9 | [DB Operator — Batch status sub-resource updates](#9-db-operator--batch-status-sub-resource-updates) | Medium | ✅ Done |
 | 6 | [DB Operator — PostgresCredentialReconciler](#6-db-operator--postgrescredentialreconciler) | High | Not Started |
 
 ---
@@ -73,7 +73,7 @@ Update the `PostgresDatabaseReconciler` to generate a random admin password for 
 
 ---
 
-## 7: DB Operator — Avoid redundant StatefulSet re-read after write
+## ✅ 7: DB Operator — Avoid redundant StatefulSet re-read after write
 
 After `reconcileStatefulSet` creates or updates the StatefulSet, `updatePhaseFromStatefulSet` immediately performs a redundant `r.Get()` to fetch the same object. Per the Kubernetes standards, write responses already fill the in-memory object with the latest API server state; re-reading from the cache may return stale data.
 
@@ -90,9 +90,9 @@ Refactor `reconcileStatefulSet` to return the `*appsv1.StatefulSet` it created o
 - Existing integration tests must continue to pass
 
 **Acceptance Criteria**
-- [ ] `reconcileStatefulSet` returns the `*appsv1.StatefulSet` from the write response
-- [ ] `updatePhaseFromStatefulSet` uses the passed-in StatefulSet — no `r.Get()` call for the StatefulSet
-- [ ] All existing integration tests pass without modification
+- [x] `reconcileStatefulSet` returns the `*appsv1.StatefulSet` from the write response
+- [x] `updatePhaseFromStatefulSet` uses the passed-in StatefulSet — no `r.Get()` call for the StatefulSet
+- [x] All existing integration tests pass without modification
 
 **Dependencies:** None (refactor of existing code)
 
@@ -100,7 +100,7 @@ Refactor `reconcileStatefulSet` to return the `*appsv1.StatefulSet` it created o
 
 ---
 
-## 8: DB Operator — Add drift check before StatefulSet update
+## ✅ 8: DB Operator — Add drift check before StatefulSet update
 
 `reconcileStatefulSet` unconditionally calls `r.Update()` on the StatefulSet every reconcile, even when the spec has not changed. This generates unnecessary etcd writes and watch events. The Service reconciler already has such a check; the StatefulSet reconciler should follow the same pattern.
 
@@ -114,9 +114,9 @@ Add an `equality.Semantic.DeepEqual` check on the StatefulSet's `Spec.Template` 
 - Existing integration tests must continue to pass
 
 **Acceptance Criteria**
-- [ ] `r.Update` is not called when the StatefulSet spec template has not drifted
-- [ ] `r.Update` is still called when the spec template has changed
-- [ ] All existing integration tests pass without modification
+- [x] `r.Update` is not called when the StatefulSet spec template has not drifted
+- [x] `r.Update` is still called when the spec template has changed
+- [x] All existing integration tests pass without modification
 
 **Dependencies:** Task 7 is recommended first (return signature change) but not strictly required
 
@@ -124,7 +124,7 @@ Add an `equality.Semantic.DeepEqual` check on the StatefulSet's `Spec.Template` 
 
 ---
 
-## 9: DB Operator — Batch status sub-resource updates
+## ✅ 9: DB Operator — Batch status sub-resource updates
 
 A single reconcile cycle can issue two separate `r.Status().Update()` calls: one in `reconcileAdminSecret` (setting `status.secretName`) and one in `setPhase` (setting `status.phase` and `status.conditions`). Each status update is a quorum write to etcd. Consolidate these into a single status write at the end of the reconcile loop.
 
@@ -139,9 +139,9 @@ A single reconcile cycle can issue two separate `r.Status().Update()` calls: one
 - Existing integration tests must continue to pass
 
 **Acceptance Criteria**
-- [ ] Only one `r.Status().Update()` call occurs per reconcile cycle (in the main `Reconcile` method)
-- [ ] `status.secretName`, `status.phase`, and `status.conditions` are all correctly persisted
-- [ ] All existing integration tests pass without modification
+- [x] Only one `r.Status().Update()` call occurs per reconcile cycle (in the main `Reconcile` method)
+- [x] `status.secretName`, `status.phase`, and `status.conditions` are all correctly persisted
+- [x] All existing integration tests pass without modification
 
 **Dependencies:** Tasks 7 and 8 should be completed first
 

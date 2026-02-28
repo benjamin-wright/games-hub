@@ -73,26 +73,31 @@ func (r *PostgresDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		}
 	}
 
-	// Reconcile the admin credentials Secret.
+	// Run sub-reconcilers, collecting the desired status in memory.
+	// On the first failure, set the Failed phase and skip subsequent reconcilers.
+	var result ctrl.Result
 	if err := r.reconcileAdminSecret(ctx, &pgdb); err != nil {
-		return r.setPhase(ctx, &pgdb, v1alpha1.DatabasePhaseFailed,
+		result = r.setPhase(&pgdb, v1alpha1.DatabasePhaseFailed,
 			"AdminSecretReconcileFailed", err.Error())
-	}
-
-	// Reconcile the headless Service.
-	if err := r.reconcileService(ctx, &pgdb); err != nil {
-		return r.setPhase(ctx, &pgdb, v1alpha1.DatabasePhaseFailed,
+	} else if err := r.reconcileService(ctx, &pgdb); err != nil {
+		result = r.setPhase(&pgdb, v1alpha1.DatabasePhaseFailed,
 			"ServiceReconcileFailed", err.Error())
+	} else {
+		sts, err := r.reconcileStatefulSet(ctx, &pgdb)
+		if err != nil {
+			result = r.setPhase(&pgdb, v1alpha1.DatabasePhaseFailed,
+				"StatefulSetReconcileFailed", err.Error())
+		} else {
+			result = r.updatePhaseFromStatefulSet(&pgdb, sts)
+		}
 	}
 
-	// Reconcile the StatefulSet.
-	if err := r.reconcileStatefulSet(ctx, &pgdb); err != nil {
-		return r.setPhase(ctx, &pgdb, v1alpha1.DatabasePhaseFailed,
-			"StatefulSetReconcileFailed", err.Error())
+	// Persist all accumulated status mutations in a single write.
+	if err := r.Status().Update(ctx, &pgdb); err != nil {
+		return ctrl.Result{}, fmt.Errorf("updating status: %w", err)
 	}
 
-	// Check StatefulSet readiness and update phase.
-	return r.updatePhaseFromStatefulSet(ctx, &pgdb)
+	return result, nil
 }
 
 // reconcileDelete handles deletion of owned resources and removes the finalizer.
@@ -158,13 +163,8 @@ func (r *PostgresDatabaseReconciler) reconcileAdminSecret(ctx context.Context, p
 	var existing corev1.Secret
 	err := r.Get(ctx, client.ObjectKey{Namespace: pgdb.Namespace, Name: name}, &existing)
 	if err == nil {
-		// Secret already exists — ensure status is populated.
-		if pgdb.Status.SecretName != name {
-			pgdb.Status.SecretName = name
-			if err := r.Status().Update(ctx, pgdb); err != nil {
-				return fmt.Errorf("updating status with SecretName: %w", err)
-			}
-		}
+		// Secret already exists — ensure status is populated in memory.
+		pgdb.Status.SecretName = name
 		return nil
 	}
 	if !apierrors.IsNotFound(err) {
@@ -195,11 +195,8 @@ func (r *PostgresDatabaseReconciler) reconcileAdminSecret(ctx context.Context, p
 		return fmt.Errorf("creating admin Secret: %w", err)
 	}
 
-	// Populate the status field.
+	// Populate the status field in memory (persisted by the caller's single status write).
 	pgdb.Status.SecretName = name
-	if err := r.Status().Update(ctx, pgdb); err != nil {
-		return fmt.Errorf("updating status with SecretName: %w", err)
-	}
 
 	return nil
 }
@@ -234,58 +231,55 @@ func (r *PostgresDatabaseReconciler) reconcileService(ctx context.Context, pgdb 
 }
 
 // reconcileStatefulSet ensures the StatefulSet exists and is up-to-date.
-func (r *PostgresDatabaseReconciler) reconcileStatefulSet(ctx context.Context, pgdb *v1alpha1.PostgresDatabase) error {
+// It returns the StatefulSet as returned by the API server (from create or
+// update) so callers can inspect the latest state without a redundant cache read.
+func (r *PostgresDatabaseReconciler) reconcileStatefulSet(ctx context.Context, pgdb *v1alpha1.PostgresDatabase) (*appsv1.StatefulSet, error) {
 	desired := r.desiredStatefulSet(pgdb)
 
 	var existing appsv1.StatefulSet
 	err := r.Get(ctx, client.ObjectKeyFromObject(desired), &existing)
 	if apierrors.IsNotFound(err) {
 		if err := r.Create(ctx, desired); err != nil {
-			return fmt.Errorf("creating StatefulSet: %w", err)
+			return nil, fmt.Errorf("creating StatefulSet: %w", err)
 		}
-		return nil
+		return desired, nil
 	}
 	if err != nil {
-		return fmt.Errorf("fetching StatefulSet: %w", err)
+		return nil, fmt.Errorf("fetching StatefulSet: %w", err)
 	}
 
-	// Update mutable fields if they have drifted.
-	existing.Spec.Template = desired.Spec.Template
-	if err := r.Update(ctx, &existing); err != nil {
-		return fmt.Errorf("updating StatefulSet: %w", err)
+	// Update mutable fields only if the spec template has drifted.
+	if !equality.Semantic.DeepEqual(existing.Spec.Template, desired.Spec.Template) {
+		existing.Spec.Template = desired.Spec.Template
+		if err := r.Update(ctx, &existing); err != nil {
+			return nil, fmt.Errorf("updating StatefulSet: %w", err)
+		}
 	}
 
-	return nil
+	return &existing, nil
 }
 
 // updatePhaseFromStatefulSet checks the StatefulSet readiness and sets the
-// PostgresDatabase phase accordingly.
-func (r *PostgresDatabaseReconciler) updatePhaseFromStatefulSet(ctx context.Context, pgdb *v1alpha1.PostgresDatabase) (ctrl.Result, error) {
-	var sts appsv1.StatefulSet
-	if err := r.Get(ctx, client.ObjectKey{
-		Namespace: pgdb.Namespace,
-		Name:      statefulSetName(pgdb),
-	}, &sts); err != nil {
-		return ctrl.Result{}, fmt.Errorf("fetching StatefulSet for status: %w", err)
-	}
-
+// PostgresDatabase phase accordingly in memory. The caller passes the StatefulSet
+// returned by the most recent API server write so no redundant cache read is needed.
+func (r *PostgresDatabaseReconciler) updatePhaseFromStatefulSet(pgdb *v1alpha1.PostgresDatabase, sts *appsv1.StatefulSet) ctrl.Result {
 	if sts.Status.ReadyReplicas >= 1 && sts.Status.ReadyReplicas == *sts.Spec.Replicas {
-		return r.setPhase(ctx, pgdb, v1alpha1.DatabasePhaseReady,
+		return r.setPhase(pgdb, v1alpha1.DatabasePhaseReady,
 			"StatefulSetReady", "StatefulSet has all replicas ready")
 	}
 
-	return r.setPhase(ctx, pgdb, v1alpha1.DatabasePhasePending,
+	return r.setPhase(pgdb, v1alpha1.DatabasePhasePending,
 		"StatefulSetNotReady", "waiting for StatefulSet replicas to become ready")
 }
 
-// setPhase updates the PostgresDatabase status phase and condition, returning the
-// reconcile result. A requeue is scheduled when the phase is Pending.
+// setPhase mutates the PostgresDatabase status phase and condition in memory.
+// The caller is responsible for persisting the status via a single
+// r.Status().Update() call. A requeue result is returned when the phase is Pending.
 func (r *PostgresDatabaseReconciler) setPhase(
-	ctx context.Context,
 	pgdb *v1alpha1.PostgresDatabase,
 	phase v1alpha1.DatabasePhase,
 	reason, message string,
-) (ctrl.Result, error) {
+) ctrl.Result {
 	pgdb.Status.Phase = phase
 
 	conditionStatus := metav1.ConditionFalse
@@ -301,15 +295,11 @@ func (r *PostgresDatabaseReconciler) setPhase(
 		ObservedGeneration: pgdb.Generation,
 	})
 
-	if err := r.Status().Update(ctx, pgdb); err != nil {
-		return ctrl.Result{}, fmt.Errorf("updating status: %w", err)
-	}
-
 	if phase == v1alpha1.DatabasePhasePending {
-		return ctrl.Result{RequeueAfter: 5_000_000_000}, nil // 5 seconds
+		return ctrl.Result{RequeueAfter: 5_000_000_000} // 5 seconds
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{}
 }
 
 // ---------- Owned resource builders ----------
