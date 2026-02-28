@@ -23,9 +23,13 @@ help: ## Display this help.
 
 ##@ Development
 
+# controller-gen is invoked via go run so no local install is required.
+CONTROLLER_GEN ?= go run sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+
 .PHONY: generate
-generate: ## Generate code (DeepCopy methods, CRD manifests, etc.)
-	go generate ./...
+generate: ## Generate DeepCopy methods and CRD manifests via controller-gen.
+	$(CONTROLLER_GEN) object:headerFile="" paths="./internal/api/..."
+	$(CONTROLLER_GEN) crd paths="./internal/api/..." output:crd:artifacts:config=helm/crds
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -36,8 +40,12 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
-test: fmt vet ## Run tests.
+test: fmt vet ## Run unit tests.
 	go test ./... -v -coverprofile cover.out
+
+.PHONY: integration-test
+integration-test: fmt vet ## Run integration tests (requires a running k3d cluster).
+	go test ./... -v -tags integration -coverprofile cover.out
 
 .PHONY: lint
 lint: ## Run golangci-lint against code.

@@ -43,6 +43,7 @@ securityContext:
       - ALL
   readOnlyRootFilesystem: true
   runAsNonRoot: true
+  runAsUser: 65532
 
 # Extra labels applied to all resources
 commonLabels: {}
