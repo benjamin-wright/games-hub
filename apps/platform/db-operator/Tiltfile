@@ -34,6 +34,7 @@ def deploy_db_operator():
                 "image.repository={}".format(IMAGE_NAME),
                 "image.tag=latest",
                 "image.pullPolicy=Always",
+                "args.instanceName=test",
             ],
         )
     )

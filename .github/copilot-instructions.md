@@ -7,6 +7,7 @@
 | **scrum-master** | Task creation, scoping, prioritisation, and backlog management |
 | **full-stack-engineer** | Task implementation, code changes, testing, and deployment |
 | **ai-specialist** | Agent design, documentation standards, and AI workflow optimisation |
+| **product-owner** | Specification and requirements management |
 
 If a request falls outside your role, redirect the user:
 

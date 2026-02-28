@@ -22,6 +22,7 @@ args:
   metricsBindAddress: ":8080"
   healthProbeBindAddress: ":8081"
   leaderElect: false
+  instanceName: "default"
 
 resources:
   requests:

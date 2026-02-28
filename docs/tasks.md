@@ -4,13 +4,13 @@ An itemised list of the next most important changes to make, ordered by priority
 
 | # | Title | Priority | Status |
 |---|-------|----------|--------|
-| 7 | [DB Operator — Instance-scoped label filtering](#7-db-operator--instance-scoped-label-filtering) | High | Not Started |
-| 2 | [DB Operator — Refactor integration test suite harness](#2-db-operator--refactor-integration-test-suite-harness) | High | Not Started |
+| 7 | [✅ DB Operator — Instance-scoped label filtering](#7-db-operator--instance-scoped-label-filtering) | High | Done |
+| 2 | [✅ DB Operator — Refactor integration test suite harness](#2-db-operator--refactor-integration-test-suite-harness) | High | Done |
 | 6 | [DB Operator — PostgresCredentialReconciler](#6-db-operator--postgrescredentialreconciler) | High | Not Started |
 
 ---
 
-## 7: DB Operator — Instance-scoped label filtering
+## 7: ✅ DB Operator — Instance-scoped label filtering
 
 Allow multiple db-operator instances to coexist in the same Kubernetes cluster by scoping each operator to only reconcile CRs that carry a matching instance label (`games-hub.io/operator-instance`). Filtering is implemented at the cache layer via `cache.Options.ByObject` label selectors, pushing filtering to the API server's list/watch request so the operator never receives or caches CRs belonging to other instances.
 
@@ -38,19 +38,19 @@ Allow multiple db-operator instances to coexist in the same Kubernetes cluster b
   - Document the instance label requirement, `--instance-name` flag, and multi-instance deployment behaviour
 
 **Acceptance Criteria**
-- [ ] Operator accepts `--instance-name` flag with a default value of `"default"`
-- [ ] Cache-level label selector is configured so the informer only receives CRs matching the operator's instance label
-- [ ] Owned sub-resources (StatefulSet, Service, Secret) carry the `games-hub.io/operator-instance` label
-- [ ] Leader election ID incorporates the instance name to prevent lock conflicts
-- [ ] A CR without the instance label is not reconciled (verified by integration test)
-- [ ] Helm chart exposes `args.instanceName` and passes it to the deployment
-- [ ] All existing integration tests pass with the instance label applied to test CRs
+- [x] Operator accepts `--instance-name` flag with a default value of `"default"`
+- [x] Cache-level label selector is configured so the informer only receives CRs matching the operator's instance label
+- [x] Owned sub-resources (StatefulSet, Service, Secret) carry the `games-hub.io/operator-instance` label
+- [x] Leader election ID incorporates the instance name to prevent lock conflicts
+- [x] A CR without the instance label is not reconciled (verified by integration test)
+- [x] Helm chart exposes `args.instanceName` and passes it to the deployment
+- [x] All existing integration tests pass with the instance label applied to test CRs
 
 **Dependencies:** None
 
 ---
 
-## 2: DB Operator — Refactor integration test suite harness
+## 2: ✅ DB Operator — Refactor integration test suite harness
 
 Refactor `apps/platform/db-operator/internal/controller/suite_test.go` to remove the in-process `controller-runtime` manager. The test suite should connect to an already-deployed operator (deployed by Tilt) rather than spinning up its own controller. `BeforeSuite` retains CRD application and direct-client setup; it no longer registers or starts a reconciler in-process.
 
@@ -61,10 +61,10 @@ Refactor `apps/platform/db-operator/internal/controller/suite_test.go` to remove
   - The `AfterSuite` can remain as-is (only calls `cancel()`)
 
 **Acceptance Criteria**
-- [ ] `suite_test.go` imports no `controller-runtime` manager or local `controller` package
-- [ ] `BeforeSuite` does not start any in-process reconciler
-- [ ] All existing integration tests in `postgresdatabase_controller_test.go` pass when the operator is deployed via Tilt (Task 1)
-- [ ] `make integration-test` continues to work when invoked via the Tilt `local_resource`
+- [x] `suite_test.go` imports no `controller-runtime` manager or local `controller` package
+- [x] `BeforeSuite` does not start any in-process reconciler
+- [x] All existing integration tests in `postgresdatabase_controller_test.go` pass when the operator is deployed via Tilt (Task 1)
+- [x] `make integration-test` continues to work when invoked via the Tilt `local_resource`
 
 **Dependencies:** Task 1 (per-application Tiltfile) must be in place so the operator is deployed before tests run
 

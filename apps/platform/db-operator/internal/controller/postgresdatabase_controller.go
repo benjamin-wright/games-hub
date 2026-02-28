@@ -36,7 +36,8 @@ const (
 // It creates and owns a StatefulSet and headless Service that back the database instance.
 type PostgresDatabaseReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme       *runtime.Scheme
+	InstanceName string
 }
 
 // +kubebuilder:rbac:groups=games-hub.io,resources=postgresdatabases,verbs=get;list;watch;create;update;patch;delete
@@ -181,7 +182,7 @@ func (r *PostgresDatabaseReconciler) reconcileAdminSecret(ctx context.Context, p
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: pgdb.Namespace,
-			Labels:    labelsForDatabase(pgdb),
+			Labels:    labelsForDatabase(pgdb, r.InstanceName),
 		},
 		StringData: map[string]string{
 			"username": "postgres",
@@ -309,11 +310,11 @@ func (r *PostgresDatabaseReconciler) desiredService(pgdb *v1alpha1.PostgresDatab
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      serviceName(pgdb),
 			Namespace: pgdb.Namespace,
-			Labels:    labelsForDatabase(pgdb),
+			Labels:    labelsForDatabase(pgdb, r.InstanceName),
 		},
 		Spec: corev1.ServiceSpec{
 			ClusterIP: corev1.ClusterIPNone,
-			Selector:  labelsForDatabase(pgdb),
+			Selector:  labelsForDatabase(pgdb, r.InstanceName),
 			Ports: []corev1.ServicePort{
 				{
 					Name:       "postgres",
@@ -335,17 +336,17 @@ func (r *PostgresDatabaseReconciler) desiredStatefulSet(pgdb *v1alpha1.PostgresD
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      statefulSetName(pgdb),
 			Namespace: pgdb.Namespace,
-			Labels:    labelsForDatabase(pgdb),
+			Labels:    labelsForDatabase(pgdb, r.InstanceName),
 		},
 		Spec: appsv1.StatefulSetSpec{
 			Replicas:    &replicas,
 			ServiceName: serviceName(pgdb),
 			Selector: &metav1.LabelSelector{
-				MatchLabels: labelsForDatabase(pgdb),
+				MatchLabels: labelsForDatabase(pgdb, r.InstanceName),
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: labelsForDatabase(pgdb),
+					Labels: labelsForDatabase(pgdb, r.InstanceName),
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -469,11 +470,12 @@ func generatePassword(length int) (string, error) {
 	return string(result), nil
 }
 
-func labelsForDatabase(pgdb *v1alpha1.PostgresDatabase) map[string]string {
+func labelsForDatabase(pgdb *v1alpha1.PostgresDatabase, instanceName string) map[string]string {
 	return map[string]string{
-		"app.kubernetes.io/name":       "postgres",
-		"app.kubernetes.io/instance":   pgdb.Name,
-		"app.kubernetes.io/managed-by": "db-operator",
+		"app.kubernetes.io/name":         "postgres",
+		"app.kubernetes.io/instance":     pgdb.Name,
+		"app.kubernetes.io/managed-by":   "db-operator",
+		"games-hub.io/operator-instance": instanceName,
 	}
 }
 

@@ -31,6 +31,7 @@ spec:
           args:
             - --metrics-bind-address={{ .Values.args.metricsBindAddress }}
             - --health-probe-bind-address={{ .Values.args.healthProbeBindAddress }}
+            - --instance-name={{ .Values.args.instanceName }}
             {{- if .Values.args.leaderElect }}
             - --leader-elect
             {{- end }}

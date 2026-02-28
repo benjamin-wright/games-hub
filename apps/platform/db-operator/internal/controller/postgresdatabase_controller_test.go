@@ -4,6 +4,7 @@ package controller_test
 
 import (
 	"fmt"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -34,6 +35,9 @@ func newTestResources(name string) (ns *corev1.Namespace, pgdb *v1alpha1.Postgre
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns.Name,
+			Labels: map[string]string{
+				"games-hub.io/operator-instance": "test",
+			},
 		},
 		Spec: v1alpha1.PostgresDatabaseSpec{
 			DatabaseName:    "mydb",
@@ -208,6 +212,65 @@ var _ = Describe("PostgresDatabaseReconciler", func() {
 			var fetched v1alpha1.PostgresDatabase
 			Expect(k8sClient.Get(ctx, lookup, &fetched)).To(Succeed())
 			Expect(fetched.Status.SecretName).To(Equal(pgdb.Name + "-admin"))
+		})
+	})
+
+	// ── Instance label filtering ─────────────────────────────────────────────
+	// Verify that a CR without the operator-instance label is never reconciled.
+	Context("when a PostgresDatabase has no operator-instance label", Ordered, func() {
+		var (
+			ns     *corev1.Namespace
+			pgdb   *v1alpha1.PostgresDatabase
+			lookup types.NamespacedName
+		)
+
+		BeforeAll(func() {
+			ns = &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "test-pgdb-nolabel-",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+
+			pgdb = &v1alpha1.PostgresDatabase{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "no-label-db",
+					Namespace: ns.Name,
+					// Deliberately omit the games-hub.io/operator-instance label.
+				},
+				Spec: v1alpha1.PostgresDatabaseSpec{
+					DatabaseName:    "mydb",
+					PostgresVersion: "16",
+					StorageSize:     resource.MustParse("256Mi"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, pgdb)).To(Succeed())
+			lookup = types.NamespacedName{Name: pgdb.Name, Namespace: ns.Name}
+		})
+
+		AfterAll(func() {
+			_ = k8sClient.Delete(ctx, pgdb)
+			_ = k8sClient.Delete(ctx, ns)
+		})
+
+		It("should never set a status phase on the CR", func() {
+			// The operator's cache excludes CRs without the instance label so the
+			// reconciler is never called. The status phase must remain empty.
+			Consistently(func(g Gomega) {
+				var fetched v1alpha1.PostgresDatabase
+				g.Expect(k8sClient.Get(ctx, lookup, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.Phase).To(BeEmpty())
+			}, 10*time.Second, interval).Should(Succeed())
+		})
+
+		It("should not create any owned sub-resources", func() {
+			var stsList appsv1.StatefulSetList
+			Expect(k8sClient.List(ctx, &stsList, client.InNamespace(ns.Name))).To(Succeed())
+			Expect(stsList.Items).To(BeEmpty(), "expected no StatefulSets for unlabelled CR")
+
+			var svcList corev1.ServiceList
+			Expect(k8sClient.List(ctx, &svcList, client.InNamespace(ns.Name))).To(Succeed())
+			Expect(svcList.Items).To(BeEmpty(), "expected no Services for unlabelled CR")
 		})
 	})
 
