@@ -164,6 +164,11 @@ spec:
                 - Ready
                 - Failed
                 type: string
+              secretName:
+                description: |-
+                  SecretName is the name of the Kubernetes Secret containing the admin
+                  credentials (username and password) for this PostgreSQL instance.
+                type: string
             type: object
         type: object
     served: true

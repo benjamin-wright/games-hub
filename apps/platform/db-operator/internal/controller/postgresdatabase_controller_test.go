@@ -120,8 +120,10 @@ var _ = Describe("PostgresDatabaseReconciler", func() {
 		}, timeout, interval).Should(Succeed())
 	})
 
-	It("should cascade-delete StatefulSet and Service when the CR is deleted", func() {
+	It("should cascade-delete StatefulSet, Service, and admin Secret when the CR is deleted", func() {
 		Expect(k8sClient.Create(ctx, pgdb)).To(Succeed())
+
+		secretLookup := types.NamespacedName{Name: pgdb.Name + "-admin", Namespace: ns.Name}
 
 		// Wait for the owned resources to exist.
 		Eventually(func(g Gomega) {
@@ -129,6 +131,8 @@ var _ = Describe("PostgresDatabaseReconciler", func() {
 			g.Expect(k8sClient.Get(ctx, lookup, &sts)).To(Succeed())
 			var svc corev1.Service
 			g.Expect(k8sClient.Get(ctx, lookup, &svc)).To(Succeed())
+			var secret corev1.Secret
+			g.Expect(k8sClient.Get(ctx, secretLookup, &secret)).To(Succeed())
 		}, timeout, interval).Should(Succeed())
 
 		// Delete the PostgresDatabase CR.
@@ -154,6 +158,14 @@ var _ = Describe("PostgresDatabaseReconciler", func() {
 		Eventually(func(g Gomega) {
 			var svc corev1.Service
 			err := k8sClient.Get(ctx, lookup, &svc)
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(client.IgnoreNotFound(err)).To(Succeed())
+		}, timeout, interval).Should(Succeed())
+
+		// Admin Secret should be gone.
+		Eventually(func(g Gomega) {
+			var secret corev1.Secret
+			err := k8sClient.Get(ctx, secretLookup, &secret)
 			g.Expect(err).To(HaveOccurred())
 			g.Expect(client.IgnoreNotFound(err)).To(Succeed())
 		}, timeout, interval).Should(Succeed())
@@ -192,6 +204,10 @@ var _ = Describe("PostgresDatabaseReconciler", func() {
 		var svcList corev1.ServiceList
 		Expect(k8sClient.List(ctx, &svcList, client.InNamespace(ns.Name), labels)).To(Succeed())
 		Expect(svcList.Items).To(BeEmpty(), fmt.Sprintf("orphaned Services: %v", svcList.Items))
+
+		var secretList corev1.SecretList
+		Expect(k8sClient.List(ctx, &secretList, client.InNamespace(ns.Name), labels)).To(Succeed())
+		Expect(secretList.Items).To(BeEmpty(), fmt.Sprintf("orphaned Secrets: %v", secretList.Items))
 	})
 
 	It("should set the correct environment variables on the Postgres container", func() {
@@ -202,14 +218,80 @@ var _ = Describe("PostgresDatabaseReconciler", func() {
 			g.Expect(k8sClient.Get(ctx, lookup, &sts)).To(Succeed())
 
 			container := sts.Spec.Template.Spec.Containers[0]
+
+			// POSTGRES_DB and POSTGRES_USER should be plain values.
 			envMap := make(map[string]string)
 			for _, e := range container.Env {
-				envMap[e.Name] = e.Value
+				if e.Value != "" {
+					envMap[e.Name] = e.Value
+				}
 			}
-
 			g.Expect(envMap["POSTGRES_DB"]).To(Equal("mydb"))
 			g.Expect(envMap["POSTGRES_USER"]).To(Equal("postgres"))
-			g.Expect(envMap["POSTGRES_PASSWORD"]).NotTo(BeEmpty())
+
+			// POSTGRES_PASSWORD must be sourced from the admin Secret via secretKeyRef.
+			var passwordEnv *corev1.EnvVar
+			for i := range container.Env {
+				if container.Env[i].Name == "POSTGRES_PASSWORD" {
+					passwordEnv = &container.Env[i]
+					break
+				}
+			}
+			g.Expect(passwordEnv).NotTo(BeNil())
+			g.Expect(passwordEnv.Value).To(BeEmpty(), "POSTGRES_PASSWORD must not have a literal value")
+			g.Expect(passwordEnv.ValueFrom).NotTo(BeNil())
+			g.Expect(passwordEnv.ValueFrom.SecretKeyRef).NotTo(BeNil())
+			g.Expect(passwordEnv.ValueFrom.SecretKeyRef.Name).To(Equal(pgdb.Name + "-admin"))
+			g.Expect(passwordEnv.ValueFrom.SecretKeyRef.Key).To(Equal("password"))
+		}, timeout, interval).Should(Succeed())
+	})
+
+	It("should create an admin Secret with username and password keys", func() {
+		Expect(k8sClient.Create(ctx, pgdb)).To(Succeed())
+
+		secretLookup := types.NamespacedName{Name: pgdb.Name + "-admin", Namespace: ns.Name}
+
+		Eventually(func(g Gomega) {
+			var secret corev1.Secret
+			g.Expect(k8sClient.Get(ctx, secretLookup, &secret)).To(Succeed())
+			g.Expect(secret.Data).To(HaveKey("username"))
+			g.Expect(secret.Data).To(HaveKey("password"))
+			g.Expect(string(secret.Data["username"])).To(Equal("postgres"))
+			g.Expect(string(secret.Data["password"])).To(HaveLen(24))
+		}, timeout, interval).Should(Succeed())
+	})
+
+	It("should set a controller owner reference on the admin Secret", func() {
+		Expect(k8sClient.Create(ctx, pgdb)).To(Succeed())
+
+		secretLookup := types.NamespacedName{Name: pgdb.Name + "-admin", Namespace: ns.Name}
+
+		Eventually(func(g Gomega) {
+			var secret corev1.Secret
+			g.Expect(k8sClient.Get(ctx, secretLookup, &secret)).To(Succeed())
+			g.Expect(secret.OwnerReferences).To(HaveLen(1))
+			g.Expect(secret.OwnerReferences[0].Name).To(Equal(pgdb.Name))
+			g.Expect(*secret.OwnerReferences[0].Controller).To(BeTrue())
+		}, timeout, interval).Should(Succeed())
+	})
+
+	It("should populate PostgresDatabaseStatus.SecretName", func() {
+		Expect(k8sClient.Create(ctx, pgdb)).To(Succeed())
+
+		Eventually(func(g Gomega) {
+			var fetched v1alpha1.PostgresDatabase
+			g.Expect(k8sClient.Get(ctx, lookup, &fetched)).To(Succeed())
+			g.Expect(fetched.Status.SecretName).To(Equal(pgdb.Name + "-admin"))
+		}, timeout, interval).Should(Succeed())
+	})
+
+	It("should still reach Ready phase with the Secret-backed password", func() {
+		Expect(k8sClient.Create(ctx, pgdb)).To(Succeed())
+
+		Eventually(func(g Gomega) {
+			var fetched v1alpha1.PostgresDatabase
+			g.Expect(k8sClient.Get(ctx, lookup, &fetched)).To(Succeed())
+			g.Expect(fetched.Status.Phase).To(Equal(v1alpha1.DatabasePhaseReady))
 		}, timeout, interval).Should(Succeed())
 	})
 })

@@ -9,8 +9,7 @@ KUBECONFIG_DIR   ?= $(HOME)/.scratch
 KUBECONFIG_PATH  ?= $(KUBECONFIG_DIR)/$(CLUSTER_NAME).yaml
 
 # Registry settings
-REGISTRY_NAME    ?= $(CLUSTER_NAME)-registry
-REGISTRY_HOST    ?= localhost
+REGISTRY_NAME    ?= $(CLUSTER_NAME)-registry.localhost
 REGISTRY_PORT    ?= 5001
 
 SHELL = /usr/bin/env bash -o pipefail
@@ -29,7 +28,11 @@ cluster-up: ## Create the local k3d cluster and registry, then write kubeconfig 
 	@echo "Creating kubeconfig directory $(KUBECONFIG_DIR) …"
 	@mkdir -p "$(KUBECONFIG_DIR)"
 	@echo "Creating k3d cluster '$(CLUSTER_NAME)' using config $(K3D_CONFIG) …"
-	k3d cluster create --config "$(K3D_CONFIG)"
+	k3d cluster create $(CLUSTER_NAME) \
+		--registry-create $(REGISTRY_NAME):0.0.0.0:$(REGISTRY_PORT) \
+		--kubeconfig-update-default=false \
+		-p "80:80@loadbalancer" \
+		--wait;
 	@echo "Writing kubeconfig to $(KUBECONFIG_PATH) …"
 	k3d kubeconfig get "$(CLUSTER_NAME)" > "$(KUBECONFIG_PATH)"
 	@echo ""

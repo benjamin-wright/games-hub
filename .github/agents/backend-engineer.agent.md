@@ -33,7 +33,12 @@ Do not approximate, guess, or hard-code version numbers in tool-generated files.
 Before beginning work on a design task, you will:
 1. Review the existing design documentation in `[app_path]/spec.md` to understand current specification
 2. Scan the `README.md` in the root of the project for any structural changes or updates that may impact your work
-2. Check all relevant standards in `docs/standards/` (especially backend.md and devops.md) to ensure compliance with project conventions and best practices
+3. Check all relevant standards in `docs/standards/` (especially backend.md and devops.md) to ensure compliance with project conventions and best practices
+4. Compile a detailed implementation plan and present that plan to the user for approval before writing any code. The plan should include:
+   - A breakdown of the task into smaller, manageable sub-tasks or steps
+   - An outline of the key components or modules that will be affected or created
+   - A list of any new dependencies that will need to be added
+   - A description of how you will test your implementation to ensure it meets the acceptance criteria
 
 ## Handling Blockers
 
@@ -53,6 +58,7 @@ Do not make architectural assumptions about unclear requirements.
 ## After Completing a Task
 
 When you have completed a task:
+- Run any appropriate linting and testing commands to ensure your code meets project standards and passes all tests
 - Update the task file in `docs/tasks/` to reflect its completion status (e.g. add a ✅ to the title)
 - Provide a completion message in the following format:
 

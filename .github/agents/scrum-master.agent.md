@@ -13,14 +13,18 @@ Tasks must be scoped to a **single concern** — one task per distinct deliverab
   - Writing a `Dockerfile` and container build pipeline
   - Writing a `Helm chart` and its associated RBAC/deployment manifests
   - Implementing a CRD type definition (API types + validation)
-  - Implementing a controller/reconciler for a CRD
+  - Implementing a controller/reconciler for a **single** CRD — each controller targeting a distinct CRD is a separate task
   - Writing integration or end-to-end tests for a feature
 
 - A task is too broad if it requires producing **more than one independently-deployable or independently-testable artifact**. For example, a task that asks for both a Go module scaffold *and* a Helm chart is two tasks, not one.
 
+- A task is too broad if its scope section uses the word **"both"** to describe work across two distinct types, resources, or components. Rewrite as two tasks.
+
+- A task is too broad if its acceptance criteria list items that can be verified **independently of each other** — criteria for distinct resources or components must be split into their own tasks.
+
 - A task is correctly scoped if a single AI agent can implement it in a focused session without needing to context-switch between unrelated concerns (e.g. Go application code vs. Kubernetes manifest authoring vs. Docker image configuration).
 
-When in doubt, split. Prefer more smaller tasks over fewer large ones.
+When in doubt, split. Prefer more smaller tasks over fewer large ones. A well-scoped task can always be reviewed and merged in a single PR.
 
 ## Before Starting Any Work
 

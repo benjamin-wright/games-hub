@@ -2,7 +2,9 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
+	"math/big"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -42,6 +44,7 @@ type PostgresDatabaseReconciler struct {
 // +kubebuilder:rbac:groups=games-hub.io,resources=postgresdatabases/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile handles create/update/delete events for PostgresDatabase resources.
 func (r *PostgresDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -68,6 +71,12 @@ func (r *PostgresDatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		if err := r.Update(ctx, &pgdb); err != nil {
 			return ctrl.Result{}, fmt.Errorf("adding finalizer: %w", err)
 		}
+	}
+
+	// Reconcile the admin credentials Secret.
+	if err := r.reconcileAdminSecret(ctx, &pgdb); err != nil {
+		return r.setPhase(ctx, &pgdb, v1alpha1.DatabasePhaseFailed,
+			"AdminSecretReconcileFailed", err.Error())
 	}
 
 	// Reconcile the headless Service.
@@ -118,6 +127,17 @@ func (r *PostgresDatabaseReconciler) reconcileDelete(ctx context.Context, pgdb *
 		return ctrl.Result{}, fmt.Errorf("deleting Service: %w", err)
 	}
 
+	// Delete the admin credentials Secret if it exists.
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      adminSecretName(pgdb),
+			Namespace: pgdb.Namespace,
+		},
+	}
+	if err := r.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("deleting admin Secret: %w", err)
+	}
+
 	// Remove finalizer so the CR can be garbage-collected.
 	controllerutil.RemoveFinalizer(pgdb, databaseFinalizerName)
 	if err := r.Update(ctx, pgdb); err != nil {
@@ -126,6 +146,62 @@ func (r *PostgresDatabaseReconciler) reconcileDelete(ctx context.Context, pgdb *
 
 	logger.Info("finalizer cleanup complete")
 	return ctrl.Result{}, nil
+}
+
+// reconcileAdminSecret ensures the admin credentials Secret exists for the
+// PostgresDatabase instance. On first reconcile it generates a random password;
+// on subsequent reconciles it verifies the Secret still exists (recreating if
+// missing) but does NOT rotate the password when the Secret is present.
+func (r *PostgresDatabaseReconciler) reconcileAdminSecret(ctx context.Context, pgdb *v1alpha1.PostgresDatabase) error {
+	name := adminSecretName(pgdb)
+
+	var existing corev1.Secret
+	err := r.Get(ctx, client.ObjectKey{Namespace: pgdb.Namespace, Name: name}, &existing)
+	if err == nil {
+		// Secret already exists — ensure status is populated.
+		if pgdb.Status.SecretName != name {
+			pgdb.Status.SecretName = name
+			if err := r.Status().Update(ctx, pgdb); err != nil {
+				return fmt.Errorf("updating status with SecretName: %w", err)
+			}
+		}
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("fetching admin Secret: %w", err)
+	}
+
+	// Secret not found — generate a new password and create it.
+	password, err := generatePassword(24)
+	if err != nil {
+		return fmt.Errorf("generating admin password: %w", err)
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: pgdb.Namespace,
+			Labels:    labelsForDatabase(pgdb),
+		},
+		StringData: map[string]string{
+			"username": "postgres",
+			"password": password,
+		},
+	}
+	if err := controllerutil.SetControllerReference(pgdb, secret, r.Scheme); err != nil {
+		return fmt.Errorf("setting owner reference on admin Secret: %w", err)
+	}
+	if err := r.Create(ctx, secret); err != nil {
+		return fmt.Errorf("creating admin Secret: %w", err)
+	}
+
+	// Populate the status field.
+	pgdb.Status.SecretName = name
+	if err := r.Status().Update(ctx, pgdb); err != nil {
+		return fmt.Errorf("updating status with SecretName: %w", err)
+	}
+
+	return nil
 }
 
 // reconcileService ensures the headless Service exists and is up-to-date.
@@ -303,8 +379,15 @@ func (r *PostgresDatabaseReconciler) desiredStatefulSet(pgdb *v1alpha1.PostgresD
 									Value: "postgres",
 								},
 								{
-									Name:  "POSTGRES_PASSWORD",
-									Value: "postgres",
+									Name: "POSTGRES_PASSWORD",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: adminSecretName(pgdb),
+											},
+											Key: "password",
+										},
+									},
 								},
 							},
 							VolumeMounts: []corev1.VolumeMount{
@@ -377,6 +460,25 @@ func serviceName(pgdb *v1alpha1.PostgresDatabase) string {
 	return pgdb.Name
 }
 
+func adminSecretName(pgdb *v1alpha1.PostgresDatabase) string {
+	return pgdb.Name + "-admin"
+}
+
+// generatePassword returns a cryptographically random alphanumeric string of
+// the specified length.
+func generatePassword(length int) (string, error) {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	result := make([]byte, length)
+	for i := range result {
+		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		if err != nil {
+			return "", fmt.Errorf("generating random byte: %w", err)
+		}
+		result[i] = charset[num.Int64()]
+	}
+	return string(result), nil
+}
+
 func labelsForDatabase(pgdb *v1alpha1.PostgresDatabase) map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/name":       "postgres",
@@ -391,5 +493,6 @@ func (r *PostgresDatabaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&v1alpha1.PostgresDatabase{}).
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&corev1.Service{}).
+		Owns(&corev1.Secret{}).
 		Complete(r)
 }

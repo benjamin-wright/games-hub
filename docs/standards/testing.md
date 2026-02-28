@@ -6,7 +6,7 @@
 
 ## Integration Tests
 - Should test at the deployable application level
-- Should test against real services where possible (e.g. an actual database)
+- Should test against real services where possible (e.g. an actual database, the local test cluster, etc.)
 - Should aim for the majority of tests here, save unit tests for complex logic that can't be efficiently covered at the integration level
 
 ## Unit Tests

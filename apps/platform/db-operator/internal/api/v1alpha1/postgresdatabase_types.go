@@ -44,6 +44,11 @@ type PostgresDatabaseStatus struct {
 	// +kubebuilder:default=Pending
 	Phase DatabasePhase `json:"phase,omitempty"`
 
+	// SecretName is the name of the Kubernetes Secret containing the admin
+	// credentials (username and password) for this PostgreSQL instance.
+	// +optional
+	SecretName string `json:"secretName,omitempty"`
+
 	// Conditions contains detailed status conditions for the PostgresDatabase.
 	// +listType=map
 	// +listMapKey=type

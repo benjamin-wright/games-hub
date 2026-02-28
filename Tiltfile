@@ -9,9 +9,7 @@
 
 # ── Settings ──────────────────────────────────────────────────────────────────
 
-REGISTRY     = "localhost:5001"
 IMAGE_NAME   = "db-operator"
-IMAGE_REF    = "{}/{}".format(REGISTRY, IMAGE_NAME)
 
 CHART_DIR    = "./apps/platform/db-operator/helm"
 RELEASE_NAME = "db-operator"
@@ -31,17 +29,16 @@ metadata:
 # ── Image build ───────────────────────────────────────────────────────────────
 
 docker_build(
-    IMAGE_REF,
-    context    = "./apps/platform/db-operator",
-    dockerfile = "./tools/docker/golang.Dockerfile",
-    build_args = {
+    IMAGE_NAME,
+    context    = "apps/platform/db-operator",
+    dockerfile = "tools/docker/golang.Dockerfile",
+    build_args={
         "CMD_PATH": "./cmd",
-        "BINARY":   "db-operator",
     },
     # Only rebuild when these paths change
     only = [
-        "./apps/platform/db-operator",
-        "./tools/docker/golang.Dockerfile",
+        ".",
+        "../../../tools/docker/golang.Dockerfile",
     ],
 )
 
@@ -57,7 +54,7 @@ k8s_yaml(
         name      = RELEASE_NAME,
         namespace = NAMESPACE,
         set = [
-            "image.repository={}".format(IMAGE_REF),
+            "image.repository={}".format(IMAGE_NAME),
             "image.tag=latest",
             "image.pullPolicy=Always",
         ],
