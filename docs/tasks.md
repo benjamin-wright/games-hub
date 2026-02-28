@@ -4,148 +4,71 @@ An itemised list of the next most important changes to make, ordered by priority
 
 | # | Title | Priority | Status |
 |---|-------|----------|--------|
-| 4 | [DB Operator — PostgresDatabaseReconciler](#4-db-operator--postgresdatabasereconciler) | High | ✅ Done |
-| 5 | [DB Operator — PostgresDatabase Admin Secret](#5-db-operator--postgresdatabase-admin-secret) | High | ✅ Done |
-| 7 | [DB Operator — Avoid redundant StatefulSet re-read after write](#7-db-operator--avoid-redundant-statefulset-re-read-after-write) | High | ✅ Done |
-| 8 | [DB Operator — Add drift check before StatefulSet update](#8-db-operator--add-drift-check-before-statefulset-update) | High | ✅ Done |
-| 9 | [DB Operator — Batch status sub-resource updates](#9-db-operator--batch-status-sub-resource-updates) | Medium | ✅ Done |
+| 7 | [DB Operator — Instance-scoped label filtering](#7-db-operator--instance-scoped-label-filtering) | High | Not Started |
+| 2 | [DB Operator — Refactor integration test suite harness](#2-db-operator--refactor-integration-test-suite-harness) | High | Not Started |
 | 6 | [DB Operator — PostgresCredentialReconciler](#6-db-operator--postgrescredentialreconciler) | High | Not Started |
 
 ---
 
-## ✅ 4: DB Operator — PostgresDatabaseReconciler
+## 7: DB Operator — Instance-scoped label filtering
 
-Implement the `PostgresDatabaseReconciler` in `apps/platform/db-operator/internal/controller/`. This controller is solely responsible for owning and reconciling the Kubernetes workloads (a `StatefulSet` and a headless `Service`) that back a `PostgresDatabase` CR. Validate with integration tests against a live Postgres instance.
+Allow multiple db-operator instances to coexist in the same Kubernetes cluster by scoping each operator to only reconcile CRs that carry a matching instance label (`games-hub.io/operator-instance`). Filtering is implemented at the cache layer via `cache.Options.ByObject` label selectors, pushing filtering to the API server's list/watch request so the operator never receives or caches CRs belonging to other instances.
 
 **Scope**
-- `PostgresDatabaseReconciler` in `apps/platform/db-operator/internal/controller/`
-  - Creates and owns a `StatefulSet` (postgres container, PVC) and headless `Service`
-  - Updates `PostgresDatabaseStatus` phase through `Pending` → `Ready` / `Failed`
-  - Finalizer to cascade-delete owned `StatefulSet` and `Service` on CR deletion
-  - Registered in `cmd/main.go`
-- Integration tests covering the full lifecycle: create → ready → delete
+- `apps/platform/db-operator/cmd/main.go`
+  - Add `--instance-name` CLI flag (default: `"default"`)
+  - Build a `labels.Selector` from `games-hub.io/operator-instance: <instanceName>` and configure `cache.Options.ByObject` for `PostgresDatabase` and `PostgresCredential` types
+  - Pass `InstanceName` to the `PostgresDatabaseReconciler` struct
+  - Update leader election ID to `fmt.Sprintf("db-operator-%s.games-hub.io", instanceName)` to avoid lock conflicts between instances
+- `apps/platform/db-operator/internal/controller/postgresdatabase_controller.go`
+  - Add `InstanceName string` field to the reconciler struct
+  - Update `labelsForDatabase()` to include `"games-hub.io/operator-instance": instanceName` in the returned label set
+  - Update all call sites (admin Secret, Service, StatefulSet builders) to pass the instance name through
+- `apps/platform/db-operator/helm/values.yaml`
+  - Add `args.instanceName: "default"`
+- `apps/platform/db-operator/helm/templates/deployment.yaml`
+  - Add `--instance-name={{ .Values.args.instanceName }}` to container args
+- `apps/platform/db-operator/internal/controller/suite_test.go`
+  - Set `InstanceName: "integration-test"` on the reconciler struct
+  - Add `cache.Options.ByObject` with the matching label selector to the test manager
+- `apps/platform/db-operator/internal/controller/postgresdatabase_controller_test.go`
+  - Update `newTestResources` to add `"games-hub.io/operator-instance": "integration-test"` to every test CR
+  - Add a test case that creates a CR **without** the instance label and verifies it is never reconciled
+- `apps/platform/db-operator/spec.md`
+  - Document the instance label requirement, `--instance-name` flag, and multi-instance deployment behaviour
 
 **Acceptance Criteria**
-- [x] Applying a `PostgresDatabase` CR results in a healthy Postgres `StatefulSet` and `Service`
-- [x] `PostgresDatabaseStatus.phase` transitions correctly through `Pending` → `Ready`
-- [x] Deleting a `PostgresDatabase` CR cascades deletion to its `StatefulSet` and `Service`
-- [x] No orphaned Kubernetes resources remain after deletion
-- [x] Integration tests cover all above lifecycle transitions and pass
+- [ ] Operator accepts `--instance-name` flag with a default value of `"default"`
+- [ ] Cache-level label selector is configured so the informer only receives CRs matching the operator's instance label
+- [ ] Owned sub-resources (StatefulSet, Service, Secret) carry the `games-hub.io/operator-instance` label
+- [ ] Leader election ID incorporates the instance name to prevent lock conflicts
+- [ ] A CR without the instance label is not reconciled (verified by integration test)
+- [ ] Helm chart exposes `args.instanceName` and passes it to the deployment
+- [ ] All existing integration tests pass with the instance label applied to test CRs
 
-**Dependencies:** Task 3 (CRD types) must be completed first
+**Dependencies:** None
 
 ---
 
-## ✅ 5: DB Operator — PostgresDatabase Admin Secret
+## 2: DB Operator — Refactor integration test suite harness
 
-Update the `PostgresDatabaseReconciler` to generate a random admin password for each `PostgresDatabase` and store the superuser credentials in an owned Kubernetes `Secret`. Replace the current hardcoded `POSTGRES_PASSWORD` with a `secretKeyRef` pointing at the generated Secret. This provides secure admin access for debugging and a reliable credential source for the `PostgresCredentialReconciler` (task 6) to connect to Postgres when provisioning application users.
-
-**Scope**
-- `PostgresDatabaseStatus` in `internal/api/v1alpha1/postgresdatabase_types.go`
-  - Add a `SecretName string` status field to record the name of the admin credentials Secret
-  - Regenerate CRD manifests via `make generate`
-- `PostgresDatabaseReconciler` in `internal/controller/postgresdatabase_controller.go`
-  - New `reconcileAdminSecret` step that runs before `reconcileStatefulSet`
-    - On first reconcile: generate a random password (`crypto/rand`, 24+ characters, alphanumeric), create a `Secret` with keys `username` (value `postgres`) and `password`, set controller owner reference
-    - On subsequent reconciles: verify the Secret still exists; recreate if missing but **do not** rotate the password if the Secret is present (password stability is required so the running Postgres instance stays accessible)
-  - Update `desiredStatefulSet` to source `POSTGRES_PASSWORD` from the admin Secret via `secretKeyRef` instead of a literal value
-  - Update `reconcileDelete` to delete the admin Secret alongside the StatefulSet and Service
-  - Add `Owns(&corev1.Secret{})` in `SetupWithManager` so Secret changes trigger reconciliation
-  - Add RBAC markers for `""` group `secrets` resource (`get;list;watch;create;update;patch;delete`)
-  - Populate `PostgresDatabaseStatus.SecretName` after the Secret is created
-- Integration tests in `internal/controller/postgresdatabase_controller_test.go`
-  - Verify the admin Secret is created with `username` and `password` keys when a `PostgresDatabase` CR is applied
-  - Verify the Secret has a controller owner reference pointing at the `PostgresDatabase` CR
-  - Verify `PostgresDatabaseStatus.SecretName` is populated
-  - Verify the StatefulSet container sources `POSTGRES_PASSWORD` from the Secret (not a literal)
-  - Verify the Secret is deleted when the `PostgresDatabase` CR is deleted
-
-**Acceptance Criteria**
-- [x] A `Secret` containing `username` and `password` keys is created alongside each `PostgresDatabase`
-- [x] The Secret has a controller owner reference to the `PostgresDatabase` CR
-- [x] `PostgresDatabaseStatus.SecretName` is populated with the admin Secret name
-- [x] The StatefulSet's `POSTGRES_PASSWORD` env var is sourced via `secretKeyRef` (no hardcoded password)
-- [x] The admin Secret is deleted during CR finalizer cleanup
-- [x] The database still reaches `Ready` phase with the Secret-backed password
-- [x] All existing and new integration tests pass
-
-**Dependencies:** Task 4 (initial `PostgresDatabaseReconciler`) must be completed first
-
----
-
-## ✅ 7: DB Operator — Avoid redundant StatefulSet re-read after write
-
-After `reconcileStatefulSet` creates or updates the StatefulSet, `updatePhaseFromStatefulSet` immediately performs a redundant `r.Get()` to fetch the same object. Per the Kubernetes standards, write responses already fill the in-memory object with the latest API server state; re-reading from the cache may return stale data.
-
-Refactor `reconcileStatefulSet` to return the `*appsv1.StatefulSet` it created or updated, and pass that directly to `updatePhaseFromStatefulSet` so it operates on the fresh write response rather than a cache read.
+Refactor `apps/platform/db-operator/internal/controller/suite_test.go` to remove the in-process `controller-runtime` manager. The test suite should connect to an already-deployed operator (deployed by Tilt) rather than spinning up its own controller. `BeforeSuite` retains CRD application and direct-client setup; it no longer registers or starts a reconciler in-process.
 
 **Scope**
-- `reconcileStatefulSet` in `internal/controller/postgresdatabase_controller.go`
-  - Change return signature to `(*appsv1.StatefulSet, error)`
-  - Return the `desired` object after `r.Create`, or the `existing` object after `r.Update`
-- `updatePhaseFromStatefulSet` in the same file
-  - Change signature to accept a `*appsv1.StatefulSet` parameter instead of performing `r.Get()`
-- `Reconcile` method
-  - Thread the returned StatefulSet from `reconcileStatefulSet` into `updatePhaseFromStatefulSet`
-- Existing integration tests must continue to pass
+- `apps/platform/db-operator/internal/controller/suite_test.go`
+  - Remove: `ctrl.NewManager`, `controller.PostgresDatabaseReconciler` registration, `go func() { mgr.Start }` goroutine, and all associated imports (`ctrl`, `metricsserver`, `controller` package)
+  - Retain: kubeconfig resolution, `kubectl apply` CRD step, direct `k8sClient` creation
+  - The `AfterSuite` can remain as-is (only calls `cancel()`)
 
 **Acceptance Criteria**
-- [x] `reconcileStatefulSet` returns the `*appsv1.StatefulSet` from the write response
-- [x] `updatePhaseFromStatefulSet` uses the passed-in StatefulSet — no `r.Get()` call for the StatefulSet
-- [x] All existing integration tests pass without modification
+- [ ] `suite_test.go` imports no `controller-runtime` manager or local `controller` package
+- [ ] `BeforeSuite` does not start any in-process reconciler
+- [ ] All existing integration tests in `postgresdatabase_controller_test.go` pass when the operator is deployed via Tilt (Task 1)
+- [ ] `make integration-test` continues to work when invoked via the Tilt `local_resource`
 
-**Dependencies:** None (refactor of existing code)
+**Dependencies:** Task 1 (per-application Tiltfile) must be in place so the operator is deployed before tests run
 
-**Standard:** `docs/standards/kubernetes.md` — "Don't read an object again if you just sent a write request"
-
----
-
-## ✅ 8: DB Operator — Add drift check before StatefulSet update
-
-`reconcileStatefulSet` unconditionally calls `r.Update()` on the StatefulSet every reconcile, even when the spec has not changed. This generates unnecessary etcd writes and watch events. The Service reconciler already has such a check; the StatefulSet reconciler should follow the same pattern.
-
-Add an `equality.Semantic.DeepEqual` check on the StatefulSet's `Spec.Template` before calling `r.Update`, matching the pattern already used in `reconcileService`.
-
-**Scope**
-- `reconcileStatefulSet` in `internal/controller/postgresdatabase_controller.go`
-  - After fetching the existing StatefulSet, compare `existing.Spec.Template` with `desired.Spec.Template` using `equality.Semantic.DeepEqual`
-  - Only call `r.Update` when they differ
-  - When they are equal, return the existing object without issuing a write
-- Existing integration tests must continue to pass
-
-**Acceptance Criteria**
-- [x] `r.Update` is not called when the StatefulSet spec template has not drifted
-- [x] `r.Update` is still called when the spec template has changed
-- [x] All existing integration tests pass without modification
-
-**Dependencies:** Task 7 is recommended first (return signature change) but not strictly required
-
-**Standard:** `docs/standards/kubernetes.md` — "Leverage optimistic locking" / minimise unnecessary writes
-
----
-
-## ✅ 9: DB Operator — Batch status sub-resource updates
-
-A single reconcile cycle can issue two separate `r.Status().Update()` calls: one in `reconcileAdminSecret` (setting `status.secretName`) and one in `setPhase` (setting `status.phase` and `status.conditions`). Each status update is a quorum write to etcd. Consolidate these into a single status write at the end of the reconcile loop.
-
-**Scope**
-- `reconcileAdminSecret` in `internal/controller/postgresdatabase_controller.go`
-  - Remove the inline `r.Status().Update()` call; mutate `pgdb.Status.SecretName` in memory only
-- `Reconcile` method
-  - Perform a single `r.Status().Update()` after all sub-reconcilers have run and `setPhase` has set its fields
-- `setPhase`
-  - Remove its own `r.Status().Update()` call; only mutate the in-memory status fields
-  - The caller (`Reconcile`) is responsible for persisting status
-- Existing integration tests must continue to pass
-
-**Acceptance Criteria**
-- [x] Only one `r.Status().Update()` call occurs per reconcile cycle (in the main `Reconcile` method)
-- [x] `status.secretName`, `status.phase`, and `status.conditions` are all correctly persisted
-- [x] All existing integration tests pass without modification
-
-**Dependencies:** Tasks 7 and 8 should be completed first
-
-**Standard:** `docs/standards/kubernetes.md` — "every direct API call results in a quorum read from etcd, which can be costly"
+**Standard:** `docs/standards/testing.md` — "simplify test harnesses where possible by deploying the application into an integration testing namespace and testing against the deployed application"
 
 ---
 

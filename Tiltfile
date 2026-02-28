@@ -1,4 +1,8 @@
-# Tiltfile — db-operator local development
+# Tiltfile — games-hub root entrypoint
+#
+# Loads deployment functions from each application and calls them.
+# Integration tests are run by each app's own Tiltfile entrypoint.
+# End-to-end tests will be added here as additional services come online.
 #
 # Prerequisites:
 #   - k3d cluster running (make cluster-up from repo root)
@@ -7,67 +11,11 @@
 # Usage:
 #   tilt up
 
-# ── Settings ──────────────────────────────────────────────────────────────────
+# ── Application deployments ───────────────────────────────────────────────────
 
-IMAGE_NAME   = "db-operator"
+load("apps/platform/db-operator/Tiltfile", "deploy_db_operator")
 
-CHART_DIR    = "./apps/platform/db-operator/helm"
-RELEASE_NAME = "db-operator"
-NAMESPACE    = "db-operator"
+deploy_db_operator()
 
-# -- Custom Tilt extensions (optional) ─────────────────────────────────────────────
-
-def namespace_create(name):
-    """Create a Kubernetes namespace if it doesn't already exist."""
-    k8s_yaml(blob("""
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: {}
-""".format(name)))
-
-# ── Image build ───────────────────────────────────────────────────────────────
-
-docker_build(
-    IMAGE_NAME,
-    context    = "apps/platform/db-operator",
-    dockerfile = "tools/docker/golang.Dockerfile",
-    build_args={
-        "CMD_PATH": "./cmd",
-    },
-    # Only rebuild when these paths change
-    only = [
-        ".",
-        "../../../tools/docker/golang.Dockerfile",
-    ],
-)
-
-# ── Namespace ─────────────────────────────────────────────────────────────────
-
-namespace_create(NAMESPACE)
-
-# ── Helm deploy ───────────────────────────────────────────────────────────────
-
-k8s_yaml(
-    helm(
-        CHART_DIR,
-        name      = RELEASE_NAME,
-        namespace = NAMESPACE,
-        set = [
-            "image.repository={}".format(IMAGE_NAME),
-            "image.tag=latest",
-            "image.pullPolicy=Always",
-        ],
-    )
-)
-
-# ── Resource configuration ────────────────────────────────────────────────────
-
-k8s_resource(
-    RELEASE_NAME,
-    port_forwards = [
-        "8080:8080",  # metrics
-        "8081:8081",  # health probes
-    ],
-    labels = ["db-operator"],
-)
+# ── End-to-end tests (placeholder) ───────────────────────────────────────────
+# local_resource("e2e-tests", cmd="make e2e-test", resource_deps=[...])

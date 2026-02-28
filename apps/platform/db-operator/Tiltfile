@@ -1,0 +1,58 @@
+# db-operator Tiltfile — standalone entrypoint and loadable deploy function.
+
+load("../../../tools/tilt/utils.tiltfile", "namespace_create")
+
+IMAGE_NAME   = "db-operator"
+RELEASE_NAME = "db-operator"
+NAMESPACE    = "db-operator"
+
+_APP_DIR   = os.path.dirname(__file__)
+_REPO_ROOT = os.path.join(_APP_DIR, "../../..")
+CHART_DIR  = os.path.join(_APP_DIR, "helm")
+
+def deploy_db_operator():
+    docker_build(
+        IMAGE_NAME,
+        context    = _APP_DIR,
+        dockerfile = os.path.join(_REPO_ROOT, "tools/docker/golang.Dockerfile"),
+        build_args = {"CMD_PATH": "./cmd"},
+        only = [
+            _APP_DIR,
+            os.path.join(_REPO_ROOT, "tools/docker/golang.Dockerfile"),
+        ],
+        ignore = ["**/bin/**", "**/cover.out"],
+    )
+
+    namespace_create(NAMESPACE)
+
+    k8s_yaml(
+        helm(
+            CHART_DIR,
+            name      = RELEASE_NAME,
+            namespace = NAMESPACE,
+            set = [
+                "image.repository={}".format(IMAGE_NAME),
+                "image.tag=latest",
+                "image.pullPolicy=Always",
+            ],
+        )
+    )
+
+    k8s_resource(
+        RELEASE_NAME,
+        port_forwards = ["8080:8080", "8081:8081"],
+        labels        = ["db-operator"],
+    )
+
+# When run standalone, deploy and run integration tests.
+# When loaded by another Tiltfile, only deploy_db_operator is executed.
+if config.main_dir == _APP_DIR:
+    deploy_db_operator()
+
+    local_resource(
+        "integration-tests",
+        cmd           = "make integration-test",
+        dir           = _APP_DIR,
+        resource_deps = [RELEASE_NAME],
+        labels        = ["db-operator"],
+    )
