@@ -4,95 +4,111 @@ An itemised list of the next most important changes to make, ordered by priority
 
 | # | Title | Priority | Status |
 |---|-------|----------|--------|
-| 7 | [✅ DB Operator — Instance-scoped label filtering](#7-db-operator--instance-scoped-label-filtering) | High | Done |
-| 2 | [✅ DB Operator — Refactor integration test suite harness](#2-db-operator--refactor-integration-test-suite-harness) | High | Done |
-| 6 | [✅ DB Operator — PostgresCredentialReconciler](#6-db-operator--postgrescredentialreconciler) | High | Done |
+| 8 | [DB Migrations — Go runner and base Docker image](#8-db-migrations--go-runner-and-base-docker-image) | High | Todo |
+| 9 | [DB Migrations — Common Helm chart](#9-db-migrations--common-helm-chart) | High | Todo |
+| 10 | [DB Migrations — Reusable Tilt functions](#10-db-migrations--reusable-tilt-functions) | High | Todo |
 
 ---
 
-## 7: ✅ DB Operator — Instance-scoped label filtering
+## 8: DB Migrations — Go runner and base Docker image
 
-Allow multiple db-operator instances to coexist in the same Kubernetes cluster by scoping each operator to only reconcile CRs that carry a matching instance label (`games-hub.io/operator-instance`). Filtering is implemented at the cache layer via `cache.Options.ByObject` label selectors, pushing filtering to the API server's list/watch request so the operator never receives or caches CRs belonging to other instances.
+A standalone Go CLI that executes versioned SQL migrations against a PostgreSQL database, tracks applied state in a `_migrations` table with content hashes, and errors on tampered files. Packaged as a reusable base Docker image that apps extend by copying in their migration SQL files.
 
 **Scope**
-- `apps/platform/db-operator/cmd/main.go`
-  - Add `--instance-name` CLI flag (default: `"default"`)
-  - Build a `labels.Selector` from `games-hub.io/operator-instance: <instanceName>` and configure `cache.Options.ByObject` for `PostgresDatabase` and `PostgresCredential` types
-  - Pass `InstanceName` to the `PostgresDatabaseReconciler` struct
-  - Update leader election ID to `fmt.Sprintf("db-operator-%s.games-hub.io", instanceName)` to avoid lock conflicts between instances
-- `apps/platform/db-operator/internal/controller/postgresdatabase_controller.go`
-  - Add `InstanceName string` field to the reconciler struct
-  - Update `labelsForDatabase()` to include `"games-hub.io/operator-instance": instanceName` in the returned label set
-  - Update all call sites (admin Secret, Service, StatefulSet builders) to pass the instance name through
-- `apps/platform/db-operator/helm/values.yaml`
-  - Add `args.instanceName: "default"`
-- `apps/platform/db-operator/helm/templates/deployment.yaml`
-  - Add `--instance-name={{ .Values.args.instanceName }}` to container args
-- `apps/platform/db-operator/internal/controller/suite_test.go`
-  - Set `InstanceName: "integration-test"` on the reconciler struct
-  - Add `cache.Options.ByObject` with the matching label selector to the test manager
-- `apps/platform/db-operator/internal/controller/postgresdatabase_controller_test.go`
-  - Update `newTestResources` to add `"games-hub.io/operator-instance": "integration-test"` to every test CR
-  - Add a test case that creates a CR **without** the instance label and verifies it is never reconciled
-- `apps/platform/db-operator/spec.md`
-  - Document the instance label requirement, `--instance-name` flag, and multi-instance deployment behaviour
+- `apps/platform/db-migrations/cmd/main.go`
+  - CLI entrypoint; reads Postgres connection details from environment variables (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`) and accepts `--target` (optional migration ID) and `--migrations-dir` (default `/migrations`) flags
+  - Exits 0 on success, non-zero on any error
+- `apps/platform/db-migrations/internal/discovery/discovery.go`
+  - Discovers migration files from the migrations directory
+  - Parses `<id>-<name>-apply.sql` / `<id>-<name>-rollback.sql` pairs; errors on missing pairs or malformed filenames
+  - Returns migrations sorted by ID
+- `apps/platform/db-migrations/internal/discovery/discovery_test.go`
+  - Unit tests: correct parsing, error on missing pair, correct ID ordering, rejection of malformed filenames
+- `apps/platform/db-migrations/internal/store/store.go`
+  - Ensures `_migrations` tracking table exists (`id TEXT PRIMARY KEY, name TEXT, applied_at TIMESTAMPTZ, apply_hash TEXT, rollback_hash TEXT`)
+  - CRUD operations for migration records; stores and compares SHA-256 content hashes
+- `apps/platform/db-migrations/internal/store/store_test.go`
+  - Integration tests against a real Postgres instance: create tracking table, insert/query/delete records, hash comparison
+- `apps/platform/db-migrations/internal/runner/runner.go`
+  - Core execution logic: validates integrity of already-applied migrations (hash comparison), determines direction (forward apply / rollback / no-op) based on current state and optional target, executes each SQL file within a transaction, updates the tracking table
+  - Uses an interface for the store to support unit testing with a fake
+- `apps/platform/db-migrations/internal/runner/runner_test.go`
+  - Unit tests: direction determination, hash mismatch detection, correct ordering of operations, no-op when fully applied
+- `apps/platform/db-migrations/Makefile`
+  - `build`, `test`, `integration-test`, `fmt`, `vet`, `lint`, `clean` targets (mirrors db-operator pattern)
+- `tools/docker/migrations.Dockerfile`
+  - Multi-stage build: builder compiles Go binary from `apps/platform/db-migrations/`, runtime stage uses `distroless/static:nonroot`, copies binary to `/usr/local/bin/migrate`
+  - `ENTRYPOINT ["/usr/local/bin/migrate"]`
+- `apps/platform/db-migrations/spec.md`
+  - Add note that the runner is implemented in Go
 
 **Acceptance Criteria**
-- [x] Operator accepts `--instance-name` flag with a default value of `"default"`
-- [x] Cache-level label selector is configured so the informer only receives CRs matching the operator's instance label
-- [x] Owned sub-resources (StatefulSet, Service, Secret) carry the `games-hub.io/operator-instance` label
-- [x] Leader election ID incorporates the instance name to prevent lock conflicts
-- [x] A CR without the instance label is not reconciled (verified by integration test)
-- [x] Helm chart exposes `args.instanceName` and passes it to the deployment
-- [x] All existing integration tests pass with the instance label applied to test CRs
+- [ ] Runner discovers `<id>-<name>-apply.sql` / `<id>-<name>-rollback.sql` files and applies them in ID order
+- [ ] `_migrations` tracking table records each applied migration with SHA-256 content hashes of apply and rollback files
+- [ ] Runner errors if a previously-applied migration file's content hash has changed
+- [ ] When `--target` is set ahead of current state, applies up to and including that ID
+- [ ] When `--target` is set behind current state, rolls back from current down to (but not including) that ID in reverse order
+- [ ] When no `--target` is specified, applies all unapplied migrations
+- [ ] Base Docker image builds and is extensible (apps add migration files via `COPY` into `/migrations`)
+- [ ] Unit tests pass for discovery, runner direction logic, and hash validation
+- [ ] Integration tests pass for store operations against a real Postgres instance
 
 **Dependencies:** None
 
----
-
-## 2: ✅ DB Operator — Refactor integration test suite harness
-
-Refactor `apps/platform/db-operator/internal/controller/suite_test.go` to remove the in-process `controller-runtime` manager. The test suite should connect to an already-deployed operator (deployed by Tilt) rather than spinning up its own controller. `BeforeSuite` retains CRD application and direct-client setup; it no longer registers or starts a reconciler in-process.
-
-**Scope**
-- `apps/platform/db-operator/internal/controller/suite_test.go`
-  - Remove: `ctrl.NewManager`, `controller.PostgresDatabaseReconciler` registration, `go func() { mgr.Start }` goroutine, and all associated imports (`ctrl`, `metricsserver`, `controller` package)
-  - Retain: kubeconfig resolution, `kubectl apply` CRD step, direct `k8sClient` creation
-  - The `AfterSuite` can remain as-is (only calls `cancel()`)
-
-**Acceptance Criteria**
-- [x] `suite_test.go` imports no `controller-runtime` manager or local `controller` package
-- [x] `BeforeSuite` does not start any in-process reconciler
-- [x] All existing integration tests in `postgresdatabase_controller_test.go` pass when the operator is deployed via Tilt (Task 1)
-- [x] `make integration-test` continues to work when invoked via the Tilt `local_resource`
-
-**Dependencies:** Task 1 (per-application Tiltfile) must be in place so the operator is deployed before tests run
-
-**Standard:** `docs/standards/testing.md` — "simplify test harnesses where possible by deploying the application into an integration testing namespace and testing against the deployed application"
+**New dependencies:** `github.com/lib/pq` (PostgreSQL driver — already used in db-operator, added as direct dependency in the new module). No other external dependencies; uses stdlib for file I/O, `crypto/sha256`, sorting, and flag parsing.
 
 ---
 
-## 6: ✅ DB Operator — PostgresCredentialReconciler
+## 9: DB Migrations — Common Helm chart
 
-Implement the `PostgresCredentialReconciler` in `apps/platform/db-operator/internal/controller/`. This controller is solely responsible for provisioning a Postgres user inside a target `PostgresDatabase` instance and writing the generated credentials into a Kubernetes `Secret`. Validate with integration tests against a live Postgres instance.
+A reusable Helm chart that deploys a Kubernetes Job for running migrations. The Job name includes an incrementing index to avoid immutable-object patch conflicts on re-deploy. Accepts a target migration ID value for selective rollouts and rollbacks.
 
 **Scope**
-- `PostgresCredentialReconciler` in `apps/platform/db-operator/internal/controller/`
-  - Waits for the target `PostgresDatabase` to be `Ready` before acting
-  - Reads the admin credentials from the `Secret` referenced by `PostgresDatabaseStatus.SecretName` to connect to Postgres
-  - Connects to Postgres and creates the specified user with a randomised password
-  - Writes username and password into the named Kubernetes `Secret`
-  - Updates `PostgresCredentialStatus` phase and secret reference
-  - Finalizer to drop the Postgres user and delete the `Secret` on CR deletion
-  - Registered in `cmd/main.go`
-- Integration tests covering the full lifecycle: create → ready → delete, including the dependency-wait behaviour when the target database is not yet `Ready`
+- `apps/platform/db-migrations/helm/Chart.yaml`
+  - Chart metadata (`name: db-migrations`, `type: application`)
+- `apps/platform/db-migrations/helm/values.yaml`
+  - `image.repository`, `image.tag`, `image.pullPolicy`
+  - `releaseIndex` (integer, incremented by caller on each deploy)
+  - `targetMigration` (string, optional — omitted or empty means "apply all")
+  - `db.secretName` (name of the K8s Secret containing `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`)
+- `apps/platform/db-migrations/helm/templates/_helpers.tpl`
+  - Standard helpers (fullname, labels, selector labels)
+- `apps/platform/db-migrations/helm/templates/job.yaml`
+  - Job name incorporates `releaseIndex` (e.g. `{{ fullname }}-{{ .Values.releaseIndex }}`) so each deploy creates a new Job
+  - Container runs the migration image with env vars sourced from `db.secretName`
+  - Conditionally passes `--target={{ .Values.targetMigration }}` when the value is non-empty
+  - `restartPolicy: Never`, `backoffLimit: 0`
+  - `ttlSecondsAfterFinished` set to a sensible default (e.g. 300)
 
 **Acceptance Criteria**
-- [x] Applying a `PostgresCredential` CR (with a `Ready` database) creates the Postgres user and populates the named `Secret`
-- [x] `PostgresCredentialStatus.phase` transitions correctly to `Ready`
-- [x] Controller waits (requeues) when the target `PostgresDatabase` is not yet `Ready`
-- [x] Deleting a `PostgresCredential` CR drops the Postgres user and removes the `Secret`
-- [x] No orphaned Postgres users or Kubernetes `Secrets` remain after deletion
-- [x] Integration tests cover all above lifecycle transitions and pass
+- [ ] `helm template` with different `releaseIndex` values produces different Job names
+- [ ] `helm template` with `targetMigration` set includes `--target` arg in the container command
+- [ ] `helm template` with `targetMigration` omitted or empty does not include `--target` arg
+- [ ] Job references the correct Secret for database connection environment variables
+- [ ] Chart is reusable across apps (no app-specific hardcoding)
 
-**Dependencies:** Task 5 (`PostgresDatabase Admin Secret`) must be completed first so the credential controller can securely obtain admin credentials
+**Dependencies:** Task 8 (the base image must exist for the Job to reference)
+
+---
+
+## 10: DB Migrations — Reusable Tilt functions
+
+Two Tilt utility functions: one for building the base migration Docker image, and one for building an app-specific migration image and deploying the migration Job alongside the application.
+
+**Scope**
+- `tools/tilt/utils.tiltfile`
+  - `migrations_base_image()` — builds the base migration Docker image using `tools/docker/migrations.Dockerfile` with `apps/platform/db-migrations/` as context
+  - `migrations_deploy(name, namespace, migrations_dir, db_secret_name, release_index, target_migration, deps)` — builds an app-specific Docker image (FROM base, COPY app's SQL files into `/migrations`), deploys the common Helm chart with the app's values via `k8s_yaml(helm(...))`, registers the Job as a `k8s_resource` with `resource_deps`
+- `Tiltfile` (root)
+  - Load and call `migrations_base_image()` so the base image is available to all apps
+- `apps/platform/db-migrations/Tiltfile`
+  - Standalone entrypoint that exercises both functions for testing the framework itself (deploys a `PostgresDatabase` + `PostgresCredential` via db-operator, runs sample migrations)
+
+**Acceptance Criteria**
+- [ ] `migrations_base_image()` builds the base Docker image successfully
+- [ ] `migrations_deploy()` builds an app-specific image extending the base and deploys the Helm chart Job
+- [ ] Both functions are loadable from any app Tiltfile via standard `load()` syntax
+- [ ] App-specific migration Job deployment integrates with `resource_deps` so it runs after its dependencies are ready
+- [ ] Root Tiltfile calls `migrations_base_image()` so the base image is available cluster-wide
+
+**Dependencies:** Task 8 (Go runner and base Docker image) and Task 9 (common Helm chart)

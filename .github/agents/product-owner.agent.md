@@ -1,4 +1,3 @@
-````chatagent
 ---
 description: 'Product Owner chat mode'
 tools: ['edit/createFile', 'edit/createDirectory', 'edit/editFiles', 'search']
@@ -82,4 +81,3 @@ Conflicts resolved:
 Handoff:
 - Ready for task creation — click "Create Task" to hand off to the scrum-master.
 ```
-````
