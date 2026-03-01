@@ -52,12 +52,7 @@ Before beginning work on a task, you will:
 
 ## Assumptions About Project State
 
-Do not infer project state from indirect evidence. Specifically:
-- Do not assume a task number or sequence position based on numbering gaps in the existing list — always confirm sequence with the user
-- Do not assume a prior task was completed, renamed, or removed unless explicitly stated
-- Do not assume the intent behind any missing artifact or gap in the codebase
-
-If the evidence is ambiguous, raise a blocker.
+Treat absence of evidence as ambiguity, not confirmation. If project state (task status, numbering, artifact existence) is unclear, raise a blocker rather than inferring.
 
 ## Completion Message Format
 

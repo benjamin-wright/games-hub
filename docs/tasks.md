@@ -4,58 +4,9 @@ An itemised list of the next most important changes to make, ordered by priority
 
 | # | Title | Priority | Status |
 |---|-------|----------|--------|
-| 8 | [DB Migrations — Go runner and base Docker image](#8-db-migrations--go-runner-and-base-docker-image) | High | Todo |
 | 9 | [DB Migrations — Common Helm chart](#9-db-migrations--common-helm-chart) | High | Todo |
 | 10 | [DB Migrations — Reusable Tilt functions](#10-db-migrations--reusable-tilt-functions) | High | Todo |
-
----
-
-## 8: DB Migrations — Go runner and base Docker image
-
-A standalone Go CLI that executes versioned SQL migrations against a PostgreSQL database, tracks applied state in a `_migrations` table with content hashes, and errors on tampered files. Packaged as a reusable base Docker image that apps extend by copying in their migration SQL files.
-
-**Scope**
-- `apps/platform/db-migrations/cmd/main.go`
-  - CLI entrypoint; reads Postgres connection details from environment variables (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`) and accepts `--target` (optional migration ID) and `--migrations-dir` (default `/migrations`) flags
-  - Exits 0 on success, non-zero on any error
-- `apps/platform/db-migrations/internal/discovery/discovery.go`
-  - Discovers migration files from the migrations directory
-  - Parses `<id>-<name>-apply.sql` / `<id>-<name>-rollback.sql` pairs; errors on missing pairs or malformed filenames
-  - Returns migrations sorted by ID
-- `apps/platform/db-migrations/internal/discovery/discovery_test.go`
-  - Unit tests: correct parsing, error on missing pair, correct ID ordering, rejection of malformed filenames
-- `apps/platform/db-migrations/internal/store/store.go`
-  - Ensures `_migrations` tracking table exists (`id TEXT PRIMARY KEY, name TEXT, applied_at TIMESTAMPTZ, apply_hash TEXT, rollback_hash TEXT`)
-  - CRUD operations for migration records; stores and compares SHA-256 content hashes
-- `apps/platform/db-migrations/internal/store/store_test.go`
-  - Integration tests against a real Postgres instance: create tracking table, insert/query/delete records, hash comparison
-- `apps/platform/db-migrations/internal/runner/runner.go`
-  - Core execution logic: validates integrity of already-applied migrations (hash comparison), determines direction (forward apply / rollback / no-op) based on current state and optional target, executes each SQL file within a transaction, updates the tracking table
-  - Uses an interface for the store to support unit testing with a fake
-- `apps/platform/db-migrations/internal/runner/runner_test.go`
-  - Unit tests: direction determination, hash mismatch detection, correct ordering of operations, no-op when fully applied
-- `apps/platform/db-migrations/Makefile`
-  - `build`, `test`, `integration-test`, `fmt`, `vet`, `lint`, `clean` targets (mirrors db-operator pattern)
-- `tools/docker/migrations.Dockerfile`
-  - Multi-stage build: builder compiles Go binary from `apps/platform/db-migrations/`, runtime stage uses `distroless/static:nonroot`, copies binary to `/usr/local/bin/migrate`
-  - `ENTRYPOINT ["/usr/local/bin/migrate"]`
-- `apps/platform/db-migrations/spec.md`
-  - Add note that the runner is implemented in Go
-
-**Acceptance Criteria**
-- [ ] Runner discovers `<id>-<name>-apply.sql` / `<id>-<name>-rollback.sql` files and applies them in ID order
-- [ ] `_migrations` tracking table records each applied migration with SHA-256 content hashes of apply and rollback files
-- [ ] Runner errors if a previously-applied migration file's content hash has changed
-- [ ] When `--target` is set ahead of current state, applies up to and including that ID
-- [ ] When `--target` is set behind current state, rolls back from current down to (but not including) that ID in reverse order
-- [ ] When no `--target` is specified, applies all unapplied migrations
-- [ ] Base Docker image builds and is extensible (apps add migration files via `COPY` into `/migrations`)
-- [ ] Unit tests pass for discovery, runner direction logic, and hash validation
-- [ ] Integration tests pass for store operations against a real Postgres instance
-
-**Dependencies:** None
-
-**New dependencies:** `github.com/lib/pq` (PostgreSQL driver — already used in db-operator, added as direct dependency in the new module). No other external dependencies; uses stdlib for file I/O, `crypto/sha256`, sorting, and flag parsing.
+| 11 | [DB Operator — Isolate standalone Tilt deployment from platform deployment](#11-db-operator--isolate-standalone-tilt-deployment-from-platform-deployment) | High | Todo |
 
 ---
 
@@ -112,3 +63,27 @@ Two Tilt utility functions: one for building the base migration Docker image, an
 - [ ] Root Tiltfile calls `migrations_base_image()` so the base image is available cluster-wide
 
 **Dependencies:** Task 8 (Go runner and base Docker image) and Task 9 (common Helm chart)
+
+---
+
+## 11: DB Operator — Isolate standalone Tilt deployment from platform deployment
+
+The db-operator's standalone local deployment (for integration testing) currently shares the same resources as the platform-wide deployment managed by the root Tiltfile. When run standalone, it replaces the platform deployment rather than coexisting alongside it. The standalone deployment must run as a separate, namespaced instance so both can operate simultaneously without conflict.
+
+**Scope**
+- `apps/platform/db-operator/helm/values.yaml`
+  - Change `args.instanceName` default from `"default"` to `""` (empty); empty means the operator processes unlabeled CRs, which is the correct platform behaviour
+- `apps/platform/db-operator/helm/templates/clusterrole.yaml` and `clusterrolebinding.yaml`
+  - Include the release namespace as a suffix in cluster-scoped resource names so that parallel deployments in different namespaces do not collide
+- `apps/platform/db-operator/Tiltfile`
+  - `deploy_db_operator(namespace, instance_name)` — accepts a target namespace and an instance name; passes both through to the Helm release (`namespace`, `args.instanceName`); remove `port_forwards` from the `k8s_resource` call
+  - Standalone block (`config.main_dir == _APP_DIR`) — calls `deploy_db_operator("db-operator-test", "test")`; `integration-tests` resource depends on the release name
+  - Platform callers invoke `deploy_db_operator("db-operator", "")` for the default cluster-wide operator
+
+**Acceptance Criteria**
+- [ ] Running `tilt up` from the db-operator directory deploys to namespace `db-operator-test` with `--instance-name=test`, without touching the platform deployment in `db-operator`
+- [ ] The root Tiltfile's `deploy_db_operator("db-operator", "")` deploys the platform-wide operator with an empty instance name
+- [ ] Both deployments can run simultaneously — different namespaces, namespace-suffixed cluster-scoped resources, no port-forward conflicts
+- [ ] Integration tests create CRs with label `games-hub.io/operator-instance: test` and are reconciled only by the test instance
+
+**Dependencies:** None

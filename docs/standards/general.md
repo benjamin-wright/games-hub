@@ -1,15 +1,15 @@
 # General Standards
 
 ## Documentation
-- Every deployable component should include a `spec.md` in its root, which should detail the features that component provides
+- Every deployable component should include a `spec.md` in its root, which should detail the features and interfaces that component provides. Specs must not restate project-wide standards (language choice, code-organisation patterns, testing practices) or describe internal implementation details — only observable behaviour and external contracts.
 
-## No Code Duplication
+## Reuse Over Reinvention
 
-Before writing any new utility, helper, or shared construct, check whether an equivalent already exists in the project. If a utility you need does not exist, create it in the appropriate `tools/` location and load/import it from there. Never define the same helper inline in more than one file.
+Before writing anything new — utility, pattern, convention, or routine — check whether an equivalent already exists in the project, a sibling module, or an existing dependency. If it does, use it. If it does not, create it in the appropriate shared location (`tools/`) so others can reuse it.
 
-## Prefer Library Functions Over Hand-Rolled Logic
-
-Before writing any sanitisation, escaping, encoding, or serialisation routine, check whether the dependency already provides one. If it does, use it — never reimplement it.
+- Never duplicate a helper inline across files; parameterise a shared function to cover variant contexts.
+- Follow the conventions established in sibling applications (libraries, structure, naming). Consistency takes priority over local preference.
+- Prefer library-provided functions over hand-rolled logic for sanitisation, encoding, serialisation, etc.
 
 ## Code Clarity
 

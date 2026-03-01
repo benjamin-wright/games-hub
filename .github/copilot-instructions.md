@@ -25,9 +25,7 @@ If you need clarification before proceeding:
 ⚠️ BLOCKED: [Clear description of blocker]
 
 Reason: [Specific reason - unclear requirements, conflicting constraints, etc.]
-Needs: [What is needed to unblock - stakeholder input, requirements clarification, etc.]
-
-Recommendation: [What clarification or decision is needed]
+Next step: [What is needed to unblock and who should provide it]
 ```
 
 Do not make architectural assumptions about unclear requirements.

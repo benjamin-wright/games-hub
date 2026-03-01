@@ -6,10 +6,9 @@ Accept external client connections and route events to internal services and mes
 ## Scope
 - Accept WebSocket client connections
 - Validate client access tokens
-- Forward events to internal queue/processors
-- Expose a health endpoint for platform checks
+- Forward client events to the NATS messaging system
 
 ## Interfaces
-- HTTP endpoint for traditional request traffic
-- WebSocket endpoint for client event traffic
-- Internal service interface for message forwarding
+- HTTP endpoint for REST API traffic
+- WebSocket endpoint for client event streams
+- NATS — publishes client events to subjects consumed by internal services

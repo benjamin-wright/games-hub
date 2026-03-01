@@ -1,20 +1,20 @@
 # Testing Standards
 
-## General
-- Each application should have integration tests covering its core workflows.
-- For anything more complex than unit tests, prefer deploying the application into a dedicated test namespace and testing against the live service.
+**Governing principle:** Test at the highest level that exercises the code path efficiently. Drop to a lower level only when combinatorial complexity makes the higher level impractical.
 
-## End To End Tests
-- Should test all user workflows
-- Should use the same interface as the user where-ever possible
+## End-to-End Tests
+- Test all user workflows through the same interface the user would use.
 
 ## Integration Tests
-- Should test at the deployable application level
-- Should test against real services where possible (e.g. an actual database, the local test cluster, etc.)
-- Should aim for the majority of tests here, save unit tests for complex logic that can't be efficiently covered at the integration level
-- Should make use of shared resources where possible, (e.g. creating a single database instance to test multiple properties, rather than a separate database instance per test clause)
-- Should simplify test harnesses where possible by deploying the application into an integration testing namespace (specific to the test suite) and testing against the deployed application.
+- Deploy the application into a dedicated test namespace and test against real services (database, cluster, etc.).
+- Aim for the majority of test coverage here — prefer shared resources (e.g. one database instance for multiple assertions) over per-test isolation.
 
 ## Unit Tests
-- used for complex logical components with a high number of possible permutations
-- used where there are minimal external dependencies, to promote minimal stubbing / mocking
+- Reserve for complex logic with many input permutations and minimal external dependencies.
+
+## Test Design Rules
+
+- Test through exported entry points. Never export a function solely for testability — exercise it indirectly via the public API.
+- Every test double must be exercised. An unused fake indicates a missing code path — delete it or rewrite the test.
+- Use `gomega` (`Expect(...).To(...)` with `RegisterTestingT(t)`) for assertions. No raw `if … { t.Errorf }`.
+- If a component can't be unit-tested without its external dependency, refactor the dependency behind an interface that a fake can replace.

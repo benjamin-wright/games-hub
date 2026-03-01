@@ -3,7 +3,7 @@
 ## Tech Choices
 - Golang
   - Use github.com/benjamin-wright/games-hub as the root repo in module names
-- NAT message passing for inter-service comms
+- NATS message passing for inter-service comms
 - Microservices
   - common app framework
   - service providers implement client libraries that service consumers utilise
@@ -35,3 +35,10 @@ Never directly create or edit files that are owned and managed by CLI tooling:
 | `go.mod` dependency versions | `go get <package>@latest` |
 
 Do not approximate, guess, or hard-code version numbers in tool-generated files.
+
+## External Dependency Ownership
+
+All interaction with an external system (database, message broker, HTTP service) must be encapsulated in a single package behind an exported interface. Other packages depend on the interface, never on the external system directly. This ensures that consumers can be unit-tested with fakes and that external-system concerns (connection handling, transactions, retries) live in one place.
+
+## Health Endpoints
+- Every deployable service exposes a health endpoint for platform readiness and liveness checks.

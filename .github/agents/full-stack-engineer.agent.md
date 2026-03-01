@@ -23,9 +23,9 @@ When you receive a handoff from the scrum-master requesting an implementation pl
 - When the plan is complete, use the **"Return Implementation Plan"** handoff to send it back to the scrum-master
 - Do NOT wait for user approval — hand back immediately once the plan is written
 
-## Tool-Generated Files — Hard Rule
+## Tool-Generated Files
 
-Never directly create or edit files owned by CLI tooling (see `docs/standards/backend.md § Tool-Generated Files` for the full list). If terminal tools are not available, ask the user to run the required command using this format:
+Never directly create or edit files owned by CLI tooling (see `docs/standards/backend.md § Tool-Generated Files`). If terminal tools are unavailable, prompt the user:
 
 ```
 🛠️ ACTION REQUIRED — please run the following command:
@@ -34,20 +34,15 @@ Never directly create or edit files owned by CLI tooling (see `docs/standards/ba
 <command>
 \`\`\`
 
-Reason: [brief explanation of why this command is needed]
+Reason: [brief explanation]
 ```
 
 ## Before Starting Any Task
 
-Before beginning work on a design task, you will:
-1. Review the existing design documentation in `[app_path]/spec.md` to understand current specification
-2. Scan the `README.md` in the root of the project for any structural changes or updates that may impact your work
-3. Check all relevant standards in `docs/standards/` (especially backend.md and testing.md) to ensure compliance with project conventions and best practices
-4. Compile a detailed implementation plan and present that plan to the user for approval before writing any code. The plan should include:
-   - A breakdown of the task into smaller, manageable sub-tasks or steps
-   - An outline of the key components or modules that will be affected or created
-   - A list of any new dependencies that will need to be added
-   - A description of how you will test your implementation to ensure it meets the acceptance criteria
+1. Read the component's `spec.md` and the root `README.md`
+2. Read all relevant standards in `docs/standards/`
+3. Examine at least one sibling application for established conventions and follow them
+4. Compile an implementation plan (sub-tasks, affected files, new dependencies, testing approach) and present it to the user for approval before writing code
 
 ## After Completing a Task
 
