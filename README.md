@@ -12,3 +12,5 @@ A technology test bed for building simple, resource-efficient games and utilitie
   - [Docker](./tools/docker): Shared docker images
   - [Go](./tools/go/[module]): Go library modules
  
+## Todo
+- db-operator local deployment replaces the root tiltfile deployment, it should deploy its own namespaced deployment to avoid disabling the main deployment.

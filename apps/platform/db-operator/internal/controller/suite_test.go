@@ -3,6 +3,7 @@
 package controller_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -15,8 +16,11 @@ import (
 	. "github.com/onsi/gomega"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/remotecommand"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -25,10 +29,12 @@ import (
 )
 
 var (
-	k8sClient client.Client
-	ctx       context.Context
-	cancel    context.CancelFunc
-	scheme    = runtime.NewScheme()
+	k8sClient  client.Client
+	clientset  *kubernetes.Clientset
+	restConfig *rest.Config
+	ctx        context.Context
+	cancel     context.CancelFunc
+	scheme     = runtime.NewScheme()
 )
 
 const (
@@ -62,6 +68,7 @@ var _ = BeforeSuite(func() {
 
 	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	Expect(err).NotTo(HaveOccurred())
+	restConfig = cfg
 
 	// Apply CRDs from the helm/crds directory so the test is self-contained.
 	crdDir := filepath.Join("..", "..", "helm", "crds")
@@ -74,8 +81,45 @@ var _ = BeforeSuite(func() {
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
+
+	// Create a typed clientset for operations like pod exec.
+	clientset, err = kubernetes.NewForConfig(cfg)
+	Expect(err).NotTo(HaveOccurred())
 })
 
 var _ = AfterSuite(func() {
 	cancel()
 })
+
+// podExec runs a command inside a pod and returns stdout. It uses the
+// suite-level clientset and restConfig so individual tests don't need to
+// create their own clients.
+func podExec(namespace, podName string, command []string) (string, string, error) {
+	req := clientset.CoreV1().RESTClient().
+		Post().
+		Resource("pods").
+		Name(podName).
+		Namespace(namespace).
+		SubResource("exec").
+		Param("container", "postgres").
+		Param("stdout", "true").
+		Param("stderr", "true")
+	for _, c := range command {
+		req = req.Param("command", c)
+	}
+
+	executor, err := remotecommand.NewSPDYExecutor(restConfig, "POST", req.URL())
+	if err != nil {
+		return "", "", fmt.Errorf("creating executor: %w", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := executor.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}); err != nil {
+		return stdout.String(), stderr.String(), err
+	}
+
+	return stdout.String(), stderr.String(), nil
+}

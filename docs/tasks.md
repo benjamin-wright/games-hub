@@ -6,7 +6,7 @@ An itemised list of the next most important changes to make, ordered by priority
 |---|-------|----------|--------|
 | 7 | [✅ DB Operator — Instance-scoped label filtering](#7-db-operator--instance-scoped-label-filtering) | High | Done |
 | 2 | [✅ DB Operator — Refactor integration test suite harness](#2-db-operator--refactor-integration-test-suite-harness) | High | Done |
-| 6 | [DB Operator — PostgresCredentialReconciler](#6-db-operator--postgrescredentialreconciler) | High | Not Started |
+| 6 | [✅ DB Operator — PostgresCredentialReconciler](#6-db-operator--postgrescredentialreconciler) | High | Done |
 
 ---
 
@@ -72,7 +72,7 @@ Refactor `apps/platform/db-operator/internal/controller/suite_test.go` to remove
 
 ---
 
-## 6: DB Operator — PostgresCredentialReconciler
+## 6: ✅ DB Operator — PostgresCredentialReconciler
 
 Implement the `PostgresCredentialReconciler` in `apps/platform/db-operator/internal/controller/`. This controller is solely responsible for provisioning a Postgres user inside a target `PostgresDatabase` instance and writing the generated credentials into a Kubernetes `Secret`. Validate with integration tests against a live Postgres instance.
 
@@ -88,11 +88,11 @@ Implement the `PostgresCredentialReconciler` in `apps/platform/db-operator/inter
 - Integration tests covering the full lifecycle: create → ready → delete, including the dependency-wait behaviour when the target database is not yet `Ready`
 
 **Acceptance Criteria**
-- [ ] Applying a `PostgresCredential` CR (with a `Ready` database) creates the Postgres user and populates the named `Secret`
-- [ ] `PostgresCredentialStatus.phase` transitions correctly to `Ready`
-- [ ] Controller waits (requeues) when the target `PostgresDatabase` is not yet `Ready`
-- [ ] Deleting a `PostgresCredential` CR drops the Postgres user and removes the `Secret`
-- [ ] No orphaned Postgres users or Kubernetes `Secrets` remain after deletion
-- [ ] Integration tests cover all above lifecycle transitions and pass
+- [x] Applying a `PostgresCredential` CR (with a `Ready` database) creates the Postgres user and populates the named `Secret`
+- [x] `PostgresCredentialStatus.phase` transitions correctly to `Ready`
+- [x] Controller waits (requeues) when the target `PostgresDatabase` is not yet `Ready`
+- [x] Deleting a `PostgresCredential` CR drops the Postgres user and removes the `Secret`
+- [x] No orphaned Postgres users or Kubernetes `Secrets` remain after deletion
+- [x] Integration tests cover all above lifecycle transitions and pass
 
 **Dependencies:** Task 5 (`PostgresDatabase Admin Secret`) must be completed first so the credential controller can securely obtain admin credentials

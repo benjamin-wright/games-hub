@@ -52,7 +52,7 @@ Before beginning work on a design task, you will:
 ## After Completing a Task
 
 When you have completed a task:
-- Run any appropriate linting and testing commands to ensure your code meets project standards and passes all tests
+- Run any appropriate linting and testing commands to ensure your code meets project standards and passes all tests (including integration and e2e tests through `tilt ci` if applicable)
 - Update the task file in `docs/tasks/` to reflect its completion status (e.g. add a ✅ to the title)
 - Provide a completion message in the following format:
 
