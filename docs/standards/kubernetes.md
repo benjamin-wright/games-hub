@@ -4,6 +4,10 @@
 
 Generally, you should always try to use the cache wherever possible and make your controller able to tolerate stale cache reads by the following means:
 
+### Guard status updates with a state check
+
+Before writing a status or phase to a resource, compare the desired state with the current state. Skip the write if nothing has changed.
+
 ### Leverage optimistic locking: use deterministic naming for objects you create (this is what the Deployment controller does).
 
 - Leverage optimistic locking / concurrency control of the API server: send updates/patches with the last-known resourceVersion from the cache (see below). This will make the request fail, if there were concurrent updates to the object (conflict error). This indicates that the controller has operated on stale data and might have made wrong decisions. In this case, let the controller handle the error with exponential backoff (simply return an error in your reconciler). This will make the controller eventually consistent.

@@ -25,7 +25,7 @@ When you receive a handoff from the scrum-master requesting an implementation pl
 
 ## Tool-Generated Files — Hard Rule
 
-Never directly create or edit files owned by CLI tooling (see `docs/standards/backend.md` for the full list). If terminal tools are not available, ask the user to run the required command using this format:
+Never directly create or edit files owned by CLI tooling (see `docs/standards/backend.md § Tool-Generated Files` for the full list). If terminal tools are not available, ask the user to run the required command using this format:
 
 ```
 🛠️ ACTION REQUIRED — please run the following command:
